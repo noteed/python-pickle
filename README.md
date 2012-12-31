@@ -13,7 +13,7 @@ deserializing those op codes then interpreting them, one can reconstruct the
 original object. Interpreting the op codes is done using a simple stack-based
 Pickle machine.
 
-## Install
+# Install
 
 The development version can be installed by cloning the Git repository and
 using cabal:
@@ -21,7 +21,7 @@ using cabal:
     > git clone git://github.com/noteed/python-pickle.git
     > cd python-pickle && cabal install
 
-## Limitation
+# Limitation
 
 Only 17 of the 53 op codes reported by `pickletools` are implemented.
 
