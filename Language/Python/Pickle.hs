@@ -29,7 +29,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 unpickle :: S.ByteString -> Either String Value
 unpickle s = do
-  xs <- parseOnly (string "\128\STX" *> many1 opcodes) s
+  xs <- parseOnly (string "\128\STX" *> many1 (choice opcodes)) s
   unpickle' xs
 
 pickle :: Value -> S.ByteString
@@ -45,7 +45,7 @@ pickle value = runPut $ do
 -- Maybe parsing could be done with a big switch and only cereal,
 -- instead of relying on attoparsec's "choice" combinator.
 
-opcodes :: Parser OpCode
+opcodes :: [Parser OpCode]
 empty_dict, empty_list, empty_tuple, tuple1, tuple2 :: Parser OpCode
 binput, mark :: Parser OpCode
 binint, binint1, binint2, binfloat :: Parser OpCode
@@ -54,7 +54,7 @@ setitem, setitems :: Parser OpCode
 append, appends :: Parser OpCode
 stop :: Parser OpCode
 
-opcodes = choice
+opcodes =
   [ empty_dict, empty_list, empty_tuple, tuple1, tuple2
   , binput, mark
   , binint, binint1, binint2, binfloat
