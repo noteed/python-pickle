@@ -1,9 +1,9 @@
 name:                python-pickle
-version:             0.0.0
+version:             0.1.0
 Cabal-Version:       >= 1.8
 synopsis:            Serialization/deserialization using Python Pickle format.
 description:
-  This package implements serialization and deserialize of Python objects
+  This package implements serialization and deserialization of Python objects
   using the Pickle format.
 category:            Development
 license:             BSD3
@@ -11,6 +11,10 @@ license-file:        LICENSE
 author:              Vo Minh Thu
 maintainer:          thu@hypered.be
 build-type:          Simple
+
+source-repository head
+  type: git
+  location: https://github.com/noteed/python-pickle
 
 library
   build-depends:       attoparsec == 0.10.*,
