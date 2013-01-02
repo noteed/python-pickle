@@ -28,8 +28,8 @@ tests :: [Test]
 tests =
   [ testGroup "PickledValues protocol 0" $
       map (\(a, b) -> testCase a $ testAgainstPython 0 b a) expressions
---  , testGroup "PickledValues protocol 1" $
---      map (\(a, b) -> testCase a $ testAgainstPython 1 b a) expressions
+  , testGroup "PickledValues protocol 1" $
+      map (\(a, b) -> testCase a $ testAgainstPython 1 b a) expressions
   , testGroup "PickledValues protocol 2" $
       map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
   ]

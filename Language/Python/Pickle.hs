@@ -26,16 +26,18 @@ import Foreign.Ptr (castPtr)
 import Foreign.Storable (peek)
 import System.IO.Unsafe (unsafePerformIO)
 
--- Note \128 is the same as \STX\x80\02, i.e. protocol 2.
-
+-- | Parse a pickled object to a list of opcodes.
 parse :: S.ByteString -> Either String [OpCode]
 parse = parseOnly (many1 $ choice opcodes)
 
+-- | Unpickle (i.e. deserialize) a Python object. Protocols 0, 1, and 2 are
+-- supported.
 unpickle :: S.ByteString -> Either String Value
 unpickle s = do
   xs <- parse s
   unpickle' xs
 
+-- | Pickle (i.e. serialize) a Python object. Protocol 2 is used.
 pickle :: Value -> S.ByteString
 pickle value = runPut $ do
   putByteString "\128\STX"
@@ -190,6 +192,7 @@ binpersid = string "Q" *> return BINPERSID
 decimalInt :: Parser Int
 decimalInt = signed decimal <* string "\n"
 
+-- TODO document the differences with Python's representation.
 doubleFloat = double <* string "\n"
 
 decimalLong :: Parser Int
@@ -367,7 +370,7 @@ protocol1 = [BININT, BININT1, BININT2, BINSTRING, SHORT_BINSTRING, BINUNICODE,
   BINFLOAT, EMPTY_LIST, APPENDS, EMPTY_TUPLE, EMPTY_DICT, SETITEMS, POP_MARK,
   BINGET, LONG_BINGET, BINPUT, LONG_BINPUT, OBJ, BINPERSID]
 protocol2 = [LONG1, LONG4, NEWTRUE, NEWFALSE, TUPLE1, TUPLE2, TUPLE3, EXT1,
-  EXT2, EXT4, NEWOBJ {-, PROTO -}]
+  EXT2, EXT4, NEWOBJ, PROTO]
 -}
 
 ----------------------------------------------------------------------
