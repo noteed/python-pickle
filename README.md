@@ -21,6 +21,11 @@ using cabal:
     > git clone git://github.com/noteed/python-pickle.git
     > cd python-pickle && cabal install
 
+# Command-line tool
+
+A `pickle` executable is provided. It can be used to inspect a pickle file
+(i.e. a file containing a pickled Python object).
+
 # Limitation
 
 Only 17 of the 53 op codes reported by `pickletools` are implemented.
