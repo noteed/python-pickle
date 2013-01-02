@@ -7,7 +7,7 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.Map as M
 import System.Process (rawSystem)
 
-import Data.Pickle
+import Language.Python.Pickle
 
 main :: IO ()
 main = mapM_ (\(a, b) -> testAgainstPython (Just b) a) expressions
