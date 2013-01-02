@@ -9,9 +9,9 @@ import Control.Applicative ((<$>), (<*), (*>))
 import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.ByteString as S
-import Data.Attoparsec hiding (take)
+import Data.Attoparsec hiding (parse, take)
 import qualified Data.Attoparsec as A
-import Data.Attoparsec.ByteString.Char8 (decimal)
+import Data.Attoparsec.ByteString.Char8 (decimal, double, signed)
 import Data.Int (Int32)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -28,9 +28,12 @@ import System.IO.Unsafe (unsafePerformIO)
 
 -- Note \128 is the same as \STX\x80\02, i.e. protocol 2.
 
+parse :: S.ByteString -> Either String [OpCode]
+parse = parseOnly (many1 $ choice opcodes)
+
 unpickle :: S.ByteString -> Either String Value
 unpickle s = do
-  xs <- parseOnly (string "\128\STX" *> many1 (choice opcodes)) s
+  xs <- parse s
   unpickle' xs
 
 pickle :: Value -> S.ByteString
@@ -61,7 +64,7 @@ opcodes =
   , get', binget, long_binget, put', binput, long_binput
   , ext1, ext2, ext4
   , global, reduce, build, inst, obj, newobj
-  , {- proto, -} stop
+  , proto, stop
   , persid, binpersid
   ]
 
@@ -79,7 +82,7 @@ long4 = string "\139" *> (LONG4 <$> decodeLong4) -- same as \x8b
 -- Strings
 
 string', binstring, short_binstring :: Parser OpCode
-string' = string "S" *> (STRING <$> undefined)
+string' = string "S" *> (STRING <$> stringnl)
 binstring = string "T" *> (BINSTRING <$> undefined)
 short_binstring = do
   _ <- string "U"
@@ -107,7 +110,7 @@ binunicode = string "X" *> (BINUNICODE <$> undefined)
 -- Floats
 
 float, binfloat :: Parser OpCode
-float = string "F" *> (FLOAT <$> undefined)
+float = string "F" *> (FLOAT <$> doubleFloat)
 binfloat = string "G" *> (BINFLOAT <$> float8)
 
 -- Lists
@@ -149,7 +152,7 @@ get', binget, long_binget, put', binput, long_binput :: Parser OpCode
 get' = string "g" *> return GET
 binget = string "h" *> (BINGET <$> undefined)
 long_binget = string "j" *> (LONG_BINGET <$> undefined)
-put' = string "p" *> (PUT <$> undefined)
+put' = string "p" *> (PUT <$> decimalInt)
 binput = string "q" *> (BINPUT . fromIntegral <$> anyWord8)
 long_binput = string "r" *> (LONG_BINPUT <$> undefined)
 
@@ -172,8 +175,8 @@ newobj = string "\129" *> return NEWOBJ -- same as \x81
 
 -- Machine control
 
-stop :: Parser OpCode
--- proto = string "\128" *> return PROTO -- same as \x80
+proto, stop :: Parser OpCode
+proto = string "\128" *> (PROTO . fromIntegral <$> anyWord8)
 stop = string "." *> return STOP
 
 -- Persistent IDs
@@ -185,14 +188,21 @@ binpersid = string "Q" *> return BINPERSID
 -- Basic parsers
 
 decimalInt :: Parser Int
-decimalInt = decimal <* string "\n"
+decimalInt = signed decimal <* string "\n"
+
+doubleFloat = double <* string "\n"
 
 decimalLong :: Parser Int
-decimalLong = decimal <* string "L\n"
+decimalLong = signed decimal <* string "L\n"
 
 decodeLong1 = undefined -- TODO
 
 decodeLong4 = undefined -- TODO
+
+-- TODO escaping not implemented.
+stringnl = choice
+  [ string "'" *> takeTill (== 39) <* string "'\n"
+  ]
 
 float8 :: Parser Double
 float8 = do
@@ -291,7 +301,7 @@ data OpCode =
   | BINUNICODE S.ByteString
 
   -- Floats
-  | FLOAT Float
+  | FLOAT Double
   | BINFLOAT Double
 
   -- Lists
@@ -341,7 +351,7 @@ data OpCode =
   | NEWOBJ
 
   -- Pickle machine control
-  -- | PROTO
+  | PROTO Int -- in [2..255]
   | STOP
 
   -- Persistent IDs
@@ -403,21 +413,41 @@ executeOne :: OpCode -> Stack -> Memo -> Either String (Stack, Memo)
 executeOne EMPTY_DICT stack memo = return (Dict M.empty: stack, memo)
 executeOne EMPTY_LIST stack memo = return (List []: stack, memo)
 executeOne EMPTY_TUPLE stack memo = return (Tuple []: stack, memo)
+executeOne (PUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
 executeOne (BINPUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
+executeOne (INT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT1 i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT2 i) stack memo = return (BinInt i:stack, memo)
+executeOne (FLOAT d) stack memo = return (BinFloat d:stack, memo)
 executeOne (BINFLOAT d) stack memo = return (BinFloat d:stack, memo)
+executeOne (STRING s) stack memo = return (BinString s:stack, memo)
 executeOne (SHORT_BINSTRING s) stack memo = return (BinString s:stack, memo)
 executeOne MARK stack memo = return (MarkObject:stack, memo)
+executeOne TUPLE stack memo = executeTuple [] stack memo
 executeOne TUPLE1 (a:stack) memo = return (Tuple [a]:stack, memo)
 executeOne TUPLE2 (b:a:stack) memo = return (Tuple [a, b]:stack, memo)
+executeOne DICT stack memo = executeDict [] stack memo
 executeOne SETITEM stack memo = executeSetitem stack memo
 executeOne SETITEMS stack memo = executeSetitems [] stack memo
+executeOne LIST stack memo = executeList [] stack memo
 executeOne APPEND stack memo = executeAppend stack memo
 executeOne APPENDS stack memo = executeAppends [] stack memo
+executeOne (PROTO _) stack memo = return (stack, memo)
 executeOne STOP stack memo = Right (stack, memo)
-executeOne _ _ _ = Left "`executeOne` unimplemented"
+executeOne op _ _ = Left $ "Can't execute opcode " ++ show op ++ "."
+
+executeTuple :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
+executeTuple l (MarkObject:stack) memo = return (Tuple l:stack, memo)
+executeTuple l (a:stack) memo = executeTuple (a : l) stack memo
+
+executeDict :: Monad m => [(Value, Value)] -> Stack -> Memo -> m ([Value], Memo)
+executeDict l (MarkObject:stack) memo = return (l `addToDict` Dict M.empty:stack, memo)
+executeDict l (a:b:stack) memo = executeDict ((b, a) : l) stack memo
+
+executeList :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
+executeList l (MarkObject:stack) memo = return (List l:stack, memo)
+executeList l (x:stack) memo = executeList (x : l) stack memo
 
 executeSetitem :: Monad m => Stack -> Memo -> m ([Value], Memo)
 executeSetitem (v:k:Dict d:stack) memo = return (Dict (M.insert k v d):stack, memo)
@@ -505,7 +535,6 @@ pickleTuple [a, b] = do
   binput' (Tuple [a, b])
 pickleTuple _ = error "pickleTuple n TODO"
 
--- TODO depending on the int range, it should not always be a BININT1
 pickleBinInt :: Int -> Pickler ()
 pickleBinInt i | i >= 0 && i < 256 = tell [BININT1 i]
                | i >= 256 && i < 65536 = tell [BININT2 i]

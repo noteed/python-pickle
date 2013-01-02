@@ -28,7 +28,7 @@ data Cmd =
     Read
     { cmdFilename :: FilePath
     , cmdContent :: Bool
-    , cmdUnpickle :: Bool
+    , cmdOpcodes :: Bool
     , cmdRepickle :: Bool
     }
     -- ^ Parse a pickle file and display some information.
@@ -44,10 +44,10 @@ cmdRead = Read
     &= explicit
     &= name "content"
     &= help "Display the file content `as-is`."
-  , cmdUnpickle = def
+  , cmdOpcodes = def
     &= explicit
-    &= name "unpickle"
-    &= help "Display the file content as a Python object."
+    &= name "opcodes"
+    &= help "Display the opcodes instead of the object."
   , cmdRepickle = def
     &= explicit
     &= name "repickle"
@@ -61,9 +61,9 @@ runCmd :: Cmd -> IO ()
 runCmd Read{..} = do
   content <- S.readFile cmdFilename
   when cmdContent $ putStrLn $ "File content:       " ++ show content
-  when (cmdUnpickle || cmdRepickle) $ do
-    case unpickle content of
-      Left err -> putStrLn $ "Unpickling error:   " ++ err
-      Right v -> do
-        when cmdUnpickle $ putStrLn $ "Unpickled object:   " ++ show v
-        when cmdRepickle $ putStrLn $ "Re-pickled content: " ++ show (pickle v)
+  case unpickle content of
+    Left err -> putStrLn $ "Unpickling error:   " ++ err
+    Right v -> do
+      when cmdOpcodes $ putStrLn $ "opcodes:   " ++ show (parse content)
+      putStrLn $ "Unpickled object:   " ++ show v
+      when cmdRepickle $ putStrLn $ "Re-pickled content: " ++ show (pickle v)

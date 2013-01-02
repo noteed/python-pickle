@@ -35,12 +35,7 @@ A `pickle` executable is provided. It can be used to inspect a pickle file
 
 # Limitation
 
-Not all opcodes are implemented.
-
-The PROTO opcode is not represented.
-
-    > python2.7 -c 'import pickletools ; print len(pickletools.opcodes)'
-    53
-    > ghc -package python-pickle -e 'length Language.Python.Pickle.opcodes'
-    52
+- Not all opcodes are implemented.
+- Strings are not correctly escaped.
+- Can pickle (i.e. serialize) only with protocol 2.
 

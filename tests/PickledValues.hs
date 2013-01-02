@@ -7,6 +7,7 @@
 module Main (main) where
 
 import Control.Arrow ((&&&))
+import Control.Monad (when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
 import Data.String (IsString)
@@ -25,8 +26,12 @@ main = defaultMain tests
 
 tests :: [Test]
 tests =
-  [ testGroup "PickledValues" $
-      map (\(a, b) -> testCase a $ testAgainstPython b a) expressions
+  [ testGroup "PickledValues protocol 0" $
+      map (\(a, b) -> testCase a $ testAgainstPython 0 b a) expressions
+--  , testGroup "PickledValues protocol 1" $
+--      map (\(a, b) -> testCase a $ testAgainstPython 1 b a) expressions
+  , testGroup "PickledValues protocol 2" $
+      map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
   ]
 
 -- The round-tripping (unpickling/pickling and comparing the original
@@ -34,21 +39,22 @@ tests =
 -- ints can be hidden (the unpickled value is incorrect but when pickled again, it
 -- is the same as the original).
 -- So we can provide an expected value.
-testAgainstPython :: Value -> String -> IO ()
-testAgainstPython expected s = do
+testAgainstPython :: Int -> Value -> String -> IO ()
+testAgainstPython protocol expected s = do
   let filename = "python-pickle-test-pickled-values.pickle"
-  _ <- rawSystem "./tests/pickle-dump.py" [s, "--output", filename]
+  _ <- rawSystem "./tests/pickle-dump.py" [s, "--output", filename,
+    "--protocol", show protocol]
   content <- S.readFile filename
   let value = unpickle content
 
   case value of
     Left err -> assertFailure $ "Can't unpickle " ++ s
       ++ show content ++ ".\nUnpickling error:\n  " ++ err
-    Right v | pickle v == content ->
-        assertEqual "Pickled valued against expected value" expected v
-    Right v -> assertFailure $
-      "Pickled value differ from the orignal:\n  "
-      ++ show content ++ "\n  " ++ show (pickle v)
+    Right v -> do
+      when (protocol == 2) $
+        assertEqual "Pickled value against original file content"
+          content (pickle v)
+      assertEqual "Unpickled value against expected value" expected v
   removeFile filename
 
 expressions :: [(String, Value)]
