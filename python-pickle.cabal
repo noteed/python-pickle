@@ -1,5 +1,5 @@
 name:                python-pickle
-version:             0.2.0
+version:             0.2.1
 Cabal-Version:       >= 1.8
 synopsis:            Serialization/deserialization using Python Pickle format.
 description:
@@ -34,3 +34,21 @@ executable pickle
                        cmdargs == 0.9.*,
                        python-pickle
   ghc-options:         -Wall
+
+test-suite pickled-values
+  hs-source-dirs: tests
+  main-is: PickledValues.hs
+  type: exitcode-stdio-1.0
+
+  build-depends:
+    base,
+    bytestring == 0.9.*,
+    containers == 0.4.*,
+    directory == 1.1.*,
+    HUnit == 1.2.*,
+    python-pickle,
+    process == 1.1.*,
+    test-framework == 0.7.*,
+    test-framework-hunit == 0.3.*
+
+  ghc-options: -Wall
