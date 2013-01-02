@@ -8,15 +8,22 @@ It offers a `Value` data type to represent Python objects, and two functions,
 
 # Implementation detail
 
-In practice the Python Pickle format is a list of serialized op codes. By
-deserializing those op codes then interpreting them, one can reconstruct the
-original object. Interpreting the op codes is done using a simple stack-based
+In practice the Python Pickle format is a list of serialized opcodes. By
+deserializing those opcodes then interpreting them, one can reconstruct the
+original object. Interpreting the opcodes is done using a simple stack-based
 Pickle machine.
+
+If you want to learn about the Pickle format, the standard Python `pickletools`
+library source is a good place to start.
 
 # Install
 
+Installing from Hackage with Cabal is straightforward:
+
+    > cabal update ; cabal install python-pickle
+
 The development version can be installed by cloning the Git repository and
-using cabal:
+using Cabal:
 
     > git clone git://github.com/noteed/python-pickle.git
     > cd python-pickle && cabal install
@@ -28,10 +35,12 @@ A `pickle` executable is provided. It can be used to inspect a pickle file
 
 # Limitation
 
-Only 17 of the 53 op codes reported by `pickletools` are implemented.
+Not all opcodes are implemented.
+
+The PROTO opcode is not represented.
 
     > python2.7 -c 'import pickletools ; print len(pickletools.opcodes)'
     53
     > ghc -package python-pickle -e 'length Language.Python.Pickle.opcodes'
-    17
+    52
 

@@ -5,12 +5,13 @@
 -- opcodes to construct a (Haskell representation of a) Python object.
 module Language.Python.Pickle where
 
-import Control.Applicative ((<$>), (*>))
+import Control.Applicative ((<$>), (<*), (*>))
 import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.ByteString as S
 import Data.Attoparsec hiding (take)
 import qualified Data.Attoparsec as A
+import Data.Attoparsec.ByteString.Char8 (decimal)
 import Data.Int (Int32)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -42,65 +43,156 @@ pickle value = runPut $ do
 -- Pickle opcodes parser
 ----------------------------------------------------------------------
 
--- Maybe parsing could be done with a big switch and only cereal,
+-- TODO parsing could be done with a big switch and only cereal,
 -- instead of relying on attoparsec's "choice" combinator.
 
 opcodes :: [Parser OpCode]
-empty_dict, empty_list, empty_tuple, tuple1, tuple2 :: Parser OpCode
-binput, mark :: Parser OpCode
-binint, binint1, binint2, binfloat :: Parser OpCode
-short_binstring :: Parser OpCode
-setitem, setitems :: Parser OpCode
-append, appends :: Parser OpCode
-stop :: Parser OpCode
-
 opcodes =
-  [ empty_dict, empty_list, empty_tuple, tuple1, tuple2
-  , binput, mark
-  , binint, binint1, binint2, binfloat
-  , short_binstring
-  , setitem, setitems
-  , append, appends
-  , stop
+  [ int, binint, binint1, binint2, long, long1, long4
+  , string', binstring, short_binstring
+  , none
+  , newtrue, newfalse
+  , unicode, binunicode
+  , float, binfloat
+  , empty_list, append, appends, list
+  , empty_tuple, tuple, tuple1, tuple2, tuple3
+  , empty_dict, dict, setitem, setitems
+  , pop, dup, mark, popmark
+  , get', binget, long_binget, put', binput, long_binput
+  , ext1, ext2, ext4
+  , global, reduce, build, inst, obj, newobj
+  , {- proto, -} stop
+  , persid, binpersid
   ]
 
-empty_dict = string "}" *> return EMPTY_DICT
+-- Integers
 
-empty_list = string "]" *> return EMPTY_LIST
-
-empty_tuple = string ")" *> return EMPTY_TUPLE
-
-binput = string "q" *> (BINPUT . fromIntegral <$> anyWord8)
-
-mark = string "(" *> return MARK
-
+int, binint, binint1, binint2, long, long1, long4 :: Parser OpCode
+int = string "I" *> (INT <$> decimalInt)
 binint = string "J" *> (BININT <$> int4)
-
 binint1 = string "K" *> (BININT1 . fromIntegral <$> anyWord8)
-
 binint2 = string "M" *> (BININT2 <$> uint2)
+long = string "L" *> (INT <$> decimalInt)
+long1 = string "\138" *> (LONG1 <$> decodeLong1) -- same as \x8a
+long4 = string "\139" *> (LONG4 <$> decodeLong4) -- same as \x8b
 
-binfloat = string "G" *> (BINFLOAT <$> float8)
+-- Strings
 
+string', binstring, short_binstring :: Parser OpCode
+string' = string "S" *> (STRING <$> undefined)
+binstring = string "T" *> (BINSTRING <$> undefined)
 short_binstring = do
   _ <- string "U"
   i <- fromIntegral <$> anyWord8
   s <- A.take i
   return $ SHORT_BINSTRING s
 
+-- None
+
+none :: Parser OpCode
+none = string "N" *> return NONE
+
+-- Booleans
+
+newtrue, newfalse :: Parser OpCode
+newtrue = string "\136" *> return NEWTRUE -- same as \x88
+newfalse = string "\137" *> return NEWFALSE -- same as \x89
+
+-- Unicode strings
+
+unicode, binunicode :: Parser OpCode
+unicode = string "V" *> (UNICODE <$> undefined)
+binunicode = string "X" *> (BINUNICODE <$> undefined)
+
+-- Floats
+
+float, binfloat :: Parser OpCode
+float = string "F" *> (FLOAT <$> undefined)
+binfloat = string "G" *> (BINFLOAT <$> float8)
+
+-- Lists
+
+empty_list, append, appends, list :: Parser OpCode
+empty_list = string "]" *> return EMPTY_LIST
+append = string "a" *> return APPEND
+appends = string "e" *> return APPENDS
+list = string "l" *> return LIST
+
+-- Tuples
+
+empty_tuple, tuple, tuple1, tuple2, tuple3 :: Parser OpCode
+empty_tuple = string ")" *> return EMPTY_TUPLE
+tuple = string "t" *> return TUPLE
 tuple1 = string "\133" *> return TUPLE1 -- same as \x85
-
 tuple2 = string "\134" *> return TUPLE2 -- same as \x86
+tuple3 = string "\135" *> return TUPLE3 -- same as \x87
 
+-- Dictionaries
+
+empty_dict, dict, setitem, setitems :: Parser OpCode
+empty_dict = string "}" *> return EMPTY_DICT
+dict = string "d" *> return DICT
 setitem = string "s" *> return SETITEM
-
 setitems = string "u" *> return SETITEMS
 
-append = string "a" *> return APPEND
+-- Stack manipulation
 
-appends = string "e" *> return APPENDS
+pop, dup, mark, popmark :: Parser OpCode
+pop = string "0" *> return POP
+dup = string "2" *> return DUP
+mark = string "(" *> return MARK
+popmark = string "1" *> return POP_MARK
 
+-- Memo manipulation
+
+get', binget, long_binget, put', binput, long_binput :: Parser OpCode
+get' = string "g" *> return GET
+binget = string "h" *> (BINGET <$> undefined)
+long_binget = string "j" *> (LONG_BINGET <$> undefined)
+put' = string "p" *> (PUT <$> undefined)
+binput = string "q" *> (BINPUT . fromIntegral <$> anyWord8)
+long_binput = string "r" *> (LONG_BINPUT <$> undefined)
+
+-- Extension registry (predefined objects)
+
+ext1, ext2, ext4 :: Parser OpCode
+ext1 = string "\130" *> (EXT1 <$> undefined) -- same as \x82
+ext2 = string "\131" *> (EXT2 <$> undefined) -- same as \x83
+ext4 = string "\132" *> (EXT4 <$> undefined) -- same as \x84
+
+-- Various
+
+global, reduce, build, inst, obj, newobj :: Parser OpCode
+global = string "c" *> (uncurry GLOBAL <$> undefined)
+reduce = string "R" *> return REDUCE
+build = string "b" *> return BUILD
+inst = string "i" *> (uncurry INST <$> undefined)
+obj = string "o" *> return OBJ
+newobj = string "\129" *> return NEWOBJ -- same as \x81
+
+-- Machine control
+
+stop :: Parser OpCode
+-- proto = string "\128" *> return PROTO -- same as \x80
 stop = string "." *> return STOP
+
+-- Persistent IDs
+
+persid, binpersid :: Parser OpCode
+persid = string "P" *> (PERSID <$> undefined)
+binpersid = string "Q" *> return BINPERSID
+
+-- Basic parsers
+
+decimalInt :: Parser Int
+decimalInt = decimal <* string "\n"
+
+decimalLong :: Parser Int
+decimalLong = decimal <* string "L\n"
+
+decodeLong1 = undefined -- TODO
+
+decodeLong4 = undefined -- TODO
 
 float8 :: Parser Double
 float8 = do
@@ -173,24 +265,100 @@ putUint2 d = putWord16le (fromIntegral d)
 ----------------------------------------------------------------------
 
 data OpCode =
-    EMPTY_DICT
-  | EMPTY_LIST
-  | EMPTY_TUPLE
-  | BINPUT Int
-  | MARK
+  -- Integers
+    INT Int
   | BININT Int
   | BININT1 Int
   | BININT2 Int
-  | BINFLOAT Double
+  | LONG Int
+  | LONG1 Int
+  | LONG4 Int
+
+  -- Strings
+  | STRING S.ByteString
+  | BINSTRING S.ByteString
   | SHORT_BINSTRING S.ByteString
-  | TUPLE1
-  | TUPLE2
-  | SETITEM
-  | SETITEMS
+
+  -- None
+  | NONE
+
+  -- Booleans
+  | NEWTRUE
+  | NEWFALSE
+
+  -- Unicode strings
+  | UNICODE S.ByteString -- TODO (use Text ?)
+  | BINUNICODE S.ByteString
+
+  -- Floats
+  | FLOAT Float
+  | BINFLOAT Double
+
+  -- Lists
+  | EMPTY_LIST
   | APPEND
   | APPENDS
+  | LIST
+
+  -- Tuples
+  | EMPTY_TUPLE
+  | TUPLE
+  | TUPLE1
+  | TUPLE2
+  | TUPLE3
+
+  -- Dictionaries
+  | EMPTY_DICT
+  | DICT
+  | SETITEM
+  | SETITEMS
+
+  -- Stack manipulation
+  | POP
+  | DUP
+  | MARK
+  | POP_MARK
+
+  -- Memo manipulation
+  | GET
+  | BINGET Int
+  | LONG_BINGET Int
+  | PUT Int
+  | BINPUT Int
+  | LONG_BINPUT Int
+
+  -- Extension registry (predefined objects)
+  | EXT1 Int
+  | EXT2 Int
+  | EXT4 Int
+
+  -- Various
+  | GLOBAL S.ByteString S.ByteString
+  | REDUCE
+  | BUILD
+  | INST S.ByteString S.ByteString
+  | OBJ
+  | NEWOBJ
+
+  -- Pickle machine control
+  -- | PROTO
   | STOP
+
+  -- Persistent IDs
+  | PERSID S.ByteString
+  | BINPERSID
   deriving Show
+
+{-
+protocol0 = [INT, LONG, STRING, NONE, UNICODE, FLOAT, APPEND, LIST, TUPLE,
+  DICT, SETITEM, POP, DUP, MARK, GET, PUT, GLOBAL, REDUCE, BUILD, INST, STOP,
+  PERSID]
+protocol1 = [BININT, BININT1, BININT2, BINSTRING, SHORT_BINSTRING, BINUNICODE,
+  BINFLOAT, EMPTY_LIST, APPENDS, EMPTY_TUPLE, EMPTY_DICT, SETITEMS, POP_MARK,
+  BINGET, LONG_BINGET, BINPUT, LONG_BINPUT, OBJ, BINPERSID]
+protocol2 = [LONG1, LONG4, NEWTRUE, NEWFALSE, TUPLE1, TUPLE2, TUPLE3, EXT1,
+  EXT2, EXT4, NEWOBJ {-, PROTO -}]
+-}
 
 ----------------------------------------------------------------------
 -- Pyhon value representation
