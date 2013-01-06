@@ -77,7 +77,7 @@ int = string "I" *> (INT <$> decimalInt)
 binint = string "J" *> (BININT <$> int4)
 binint1 = string "K" *> (BININT1 . fromIntegral <$> anyWord8)
 binint2 = string "M" *> (BININT2 <$> uint2)
-long = string "L" *> (INT <$> decimalInt)
+long = string "L" *> (LONG <$> decimalLong)
 long1 = string "\138" *> (LONG1 <$> decodeLong1) -- same as \x8a
 long4 = string "\139" *> (LONG4 <$> decodeLong4) -- same as \x8b
 
@@ -198,7 +198,11 @@ doubleFloat = double <* string "\n"
 decimalLong :: Parser Int
 decimalLong = signed decimal <* string "L\n"
 
-decodeLong1 = undefined -- TODO
+decodeLong1 :: Parser Int
+decodeLong1 = do
+  n <- fromIntegral <$> anyWord8
+  fst . fst . toLong <$> A.take n
+  where toLong = S.mapAccumL (\(a, b) w -> ((a + b * fromIntegral w, b + 1), w)) (0, 1)
 
 decodeLong4 = undefined -- TODO
 
@@ -246,6 +250,7 @@ serialize opcode = case opcode of
   BININT i -> putByteString "J" >> putWord32le (fromIntegral i)
   BININT1 i -> putByteString "K" >> putWord8 (fromIntegral i)
   BININT2 i -> putByteString "M" >> putUint2 i
+  LONG1 i -> putByteString "\138" >> encodeLong1 i
   BINFLOAT d -> putByteString "G" >> putFloat8 d
   SHORT_BINSTRING s -> do
     putByteString "U"
@@ -272,6 +277,15 @@ putFloat8 d = putWord64be (coerce d)
 
 putUint2 :: Int -> Put
 putUint2 d = putWord16le (fromIntegral d)
+
+encodeLong1 :: Int -> Put
+encodeLong1 i = do
+  -- TODO is it possible to know xs length without really constructing xs?
+  let xs = f i
+      f i | i < 256 = [fromIntegral i]
+          | otherwise = let (n, r) = i `divMod` 256 in fromIntegral r : f n
+  putWord8 (fromIntegral $ length xs)
+  mapM_ putWord8 xs
 
 ----------------------------------------------------------------------
 -- Pickle opcodes
@@ -383,6 +397,7 @@ data Value =
   | List [Value]
   | Tuple [Value]
   | BinInt Int
+  | BinLong Int
   | BinFloat Double
   | BinString S.ByteString
   | MarkObject -- Urk, not really a value.
@@ -422,6 +437,8 @@ executeOne (INT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT1 i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT2 i) stack memo = return (BinInt i:stack, memo)
+executeOne (LONG i) stack memo = return (BinLong i:stack, memo)
+executeOne (LONG1 i) stack memo = return (BinLong i:stack, memo)
 executeOne (FLOAT d) stack memo = return (BinFloat d:stack, memo)
 executeOne (BINFLOAT d) stack memo = return (BinFloat d:stack, memo)
 executeOne (STRING s) stack memo = return (BinString s:stack, memo)
@@ -486,6 +503,7 @@ pickle' value = case value of
   List xs -> pickleList xs
   Tuple xs -> pickleTuple xs
   BinInt i -> pickleBinInt i
+  BinLong i -> pickleBinLong i
   BinFloat d -> pickleBinFloat d
   BinString s -> pickleBinString s
   x -> error $ "TODO: pickle " ++ show x
@@ -542,6 +560,9 @@ pickleBinInt :: Int -> Pickler ()
 pickleBinInt i | i >= 0 && i < 256 = tell [BININT1 i]
                | i >= 256 && i < 65536 = tell [BININT2 i]
                | otherwise = tell [BININT i]
+
+pickleBinLong :: Int -> Pickler ()
+pickleBinLong i = tell [LONG1 i] -- TODO LONG/LONG1/LONG4
 
 -- TODO probably depends on the float range
 pickleBinFloat :: Double -> Pickler ()
