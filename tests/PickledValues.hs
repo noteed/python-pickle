@@ -74,6 +74,8 @@ expressions =
   , ("(1,)", Tuple [BinInt 1])
   , ("(1, 2)", Tuple [BinInt 1, BinInt 2])
 
+  , ("None", None)
+
   , ("{'datapoints': [(1, 2)]}",
       Dict $ M.fromList [(BinString "datapoints",
         List [Tuple [BinInt 1, BinInt 2]])])

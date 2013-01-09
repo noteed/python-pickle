@@ -255,6 +255,7 @@ serialize opcode = case opcode of
   BININT i -> putByteString "J" >> putWord32le (fromIntegral i)
   BININT1 i -> putByteString "K" >> putWord8 (fromIntegral i)
   BININT2 i -> putByteString "M" >> putUint2 i
+  NONE -> putByteString "N"
   LONG1 0 -> putByteString "\138\NUL"
   LONG1 i -> putByteString "\138" >> encodeLong1 i
   BINFLOAT d -> putByteString "G" >> putFloat8 d
@@ -421,6 +422,7 @@ data Value =
     Dict (Map Value Value)
   | List [Value]
   | Tuple [Value]
+  | None
   | BinInt Int
   | BinLong Int
   | BinFloat Double
@@ -458,6 +460,7 @@ executeOne EMPTY_LIST stack memo = return (List []: stack, memo)
 executeOne EMPTY_TUPLE stack memo = return (Tuple []: stack, memo)
 executeOne (PUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
 executeOne (BINPUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
+executeOne NONE stack memo = return (None:stack, memo)
 executeOne (INT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT1 i) stack memo = return (BinInt i:stack, memo)
@@ -527,6 +530,7 @@ pickle' value = case value of
   Dict d -> pickleDict d
   List xs -> pickleList xs
   Tuple xs -> pickleTuple xs
+  None -> tell [NONE]
   BinInt i -> pickleBinInt i
   BinLong i -> pickleBinLong i
   BinFloat d -> pickleBinFloat d
