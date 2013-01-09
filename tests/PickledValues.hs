@@ -75,6 +75,8 @@ expressions =
   , ("(1, 2)", Tuple [BinInt 1, BinInt 2])
 
   , ("None", None)
+  , ("True", Bool True)
+  , ("False", Bool False)
 
   , ("{'datapoints': [(1, 2)]}",
       Dict $ M.fromList [(BinString "datapoints",

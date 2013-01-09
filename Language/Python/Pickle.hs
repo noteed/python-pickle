@@ -53,7 +53,9 @@ pickle value = runPut $ do
 
 opcodes :: [Parser OpCode]
 opcodes =
-  [ int, binint, binint1, binint2, long, long1, long4
+  -- true and false are in fact special cases for the int parser,
+  -- It is important they are tried before int.
+  [ true, false, int, binint, binint1, binint2, long, long1, long4
   , string', binstring, short_binstring
   , none
   , newtrue, newfalse
@@ -99,7 +101,9 @@ none = string "N" *> return NONE
 
 -- Booleans
 
-newtrue, newfalse :: Parser OpCode
+true, false, newtrue, newfalse :: Parser OpCode
+true = string "I01" *> return NEWTRUE
+false = string "I00" *> return NEWFALSE
 newtrue = string "\136" *> return NEWTRUE -- same as \x88
 newfalse = string "\137" *> return NEWFALSE -- same as \x89
 
@@ -256,6 +260,8 @@ serialize opcode = case opcode of
   BININT1 i -> putByteString "K" >> putWord8 (fromIntegral i)
   BININT2 i -> putByteString "M" >> putUint2 i
   NONE -> putByteString "N"
+  NEWTRUE -> putByteString "\136"
+  NEWFALSE -> putByteString "\137"
   LONG1 0 -> putByteString "\138\NUL"
   LONG1 i -> putByteString "\138" >> encodeLong1 i
   BINFLOAT d -> putByteString "G" >> putFloat8 d
@@ -423,6 +429,7 @@ data Value =
   | List [Value]
   | Tuple [Value]
   | None
+  | Bool Bool
   | BinInt Int
   | BinLong Int
   | BinFloat Double
@@ -461,6 +468,8 @@ executeOne EMPTY_TUPLE stack memo = return (Tuple []: stack, memo)
 executeOne (PUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
 executeOne (BINPUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
 executeOne NONE stack memo = return (None:stack, memo)
+executeOne NEWTRUE stack memo = return (Bool True:stack, memo)
+executeOne NEWFALSE stack memo = return (Bool False:stack, memo)
 executeOne (INT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT1 i) stack memo = return (BinInt i:stack, memo)
@@ -531,6 +540,8 @@ pickle' value = case value of
   List xs -> pickleList xs
   Tuple xs -> pickleTuple xs
   None -> tell [NONE]
+  Bool True -> tell [NEWTRUE]
+  Bool False -> tell [NEWFALSE]
   BinInt i -> pickleBinInt i
   BinLong i -> pickleBinLong i
   BinFloat d -> pickleBinFloat d
