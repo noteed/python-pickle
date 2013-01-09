@@ -201,8 +201,13 @@ decimalLong = signed decimal <* string "L\n"
 decodeLong1 :: Parser Int
 decodeLong1 = do
   n <- fromIntegral <$> anyWord8
-  fst . fst . toLong <$> A.take n
-  where toLong = S.mapAccumL (\(a, b) w -> ((a + b * fromIntegral w, b + 1), w)) (0, 1)
+  if n > 0
+    then do
+      ns <- A.take n
+      let a = fst . fst $ toLong ns
+      return $ if S.last ns > 127 then negate $ 256 ^ S.length ns - a else a
+    else return 0
+  where toLong = S.mapAccumL (\(a, b) w -> ((a + 256 ^ b * fromIntegral w, b + 1), w)) (0, 0)
 
 decodeLong4 = undefined -- TODO
 
@@ -250,6 +255,7 @@ serialize opcode = case opcode of
   BININT i -> putByteString "J" >> putWord32le (fromIntegral i)
   BININT1 i -> putByteString "K" >> putWord8 (fromIntegral i)
   BININT2 i -> putByteString "M" >> putUint2 i
+  LONG1 0 -> putByteString "\138\NUL"
   LONG1 i -> putByteString "\138" >> encodeLong1 i
   BINFLOAT d -> putByteString "G" >> putFloat8 d
   SHORT_BINSTRING s -> do
@@ -281,11 +287,30 @@ putUint2 d = putWord16le (fromIntegral d)
 encodeLong1 :: Int -> Put
 encodeLong1 i = do
   -- TODO is it possible to know xs length without really constructing xs?
-  let xs = f i
-      f i | i < 256 = [fromIntegral i]
-          | otherwise = let (n, r) = i `divMod` 256 in fromIntegral r : f n
-  putWord8 (fromIntegral $ length xs)
-  mapM_ putWord8 xs
+  let xs = f $ abs i
+      f j | j < 256 = [fromIntegral j]
+          | otherwise = let (n, r) = j `divMod` 256 in fromIntegral r : f n
+      e = 256 ^ length xs
+      m = e `div` 2 - 1
+  if i < 0
+    then do
+      if (abs i) > e `div` 2
+        then do
+          putWord8 (fromIntegral $ length xs + 1)
+          mapM_ putWord8 $ f (e + i)
+          putWord8 255
+        else do
+          putWord8 (fromIntegral $ length xs)
+          mapM_ putWord8 $ f (e + i)
+    else
+      if i > e `div` 2 - 1
+        then do
+          putWord8 (fromIntegral $ length xs + 1)
+          mapM_ putWord8 xs
+          putWord8 0
+        else do
+          putWord8 (fromIntegral $ length xs)
+          mapM_ putWord8 xs
 
 ----------------------------------------------------------------------
 -- Pickle opcodes

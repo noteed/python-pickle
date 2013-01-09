@@ -42,8 +42,8 @@ tests =
 testAgainstPython :: Int -> Value -> String -> IO ()
 testAgainstPython protocol expected s = do
   let filename = "python-pickle-test-pickled-values.pickle"
-  _ <- rawSystem "./tests/pickle-dump.py" [s, "--output", filename,
-    "--protocol", show protocol]
+  _ <- rawSystem "./tests/pickle-dump.py" ["--output", filename,
+    "--protocol", show protocol, "--", s]
   content <- S.readFile filename
   let value = unpickle content
 
@@ -51,10 +51,10 @@ testAgainstPython protocol expected s = do
     Left err -> assertFailure $ "Can't unpickle " ++ s
       ++ show content ++ ".\nUnpickling error:\n  " ++ err
     Right v -> do
+      assertEqual "Unpickled value against expected value" expected v
       when (protocol == 2) $
         assertEqual "Pickled value against original file content"
           content (pickle v)
-      assertEqual "Unpickled value against expected value" expected v
   removeFile filename
 
 expressions :: [(String, Value)]
@@ -85,18 +85,17 @@ expressions =
             , BinString "foo")
           ])
   , ("[(1, 2)]", List [Tuple [BinInt 1, BinInt 2]])
-
-  , ("1L", BinLong 1)
   ]
   ++ map (show &&& BinInt) ints
   ++ map (show &&& BinFloat) doubles
   ++ map (quote . C.unpack &&& BinString) strings
+  ++ map ((++ "L") . show &&& BinLong) ints
 
 ints :: [Int]
 ints =
   [0, 10..100] ++ [100, 150..1000] ++
   [1000, 1500..10000] ++ [10000, 50000..1000000] ++
-  map negate [10000, 50000..1000000]
+  map negate ([1,126,127,128,129] ++ [10000, 50000..1000000])
 
 doubles :: [Double]
 doubles =
