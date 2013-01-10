@@ -272,6 +272,7 @@ serialize opcode = case opcode of
   EMPTY_DICT -> putByteString "}"
   EMPTY_LIST -> putByteString "]"
   EMPTY_TUPLE -> putByteString ")"
+  TUPLE -> putByteString "t"
   TUPLE1 -> putByteString "\133"
   TUPLE2 -> putByteString "\134"
   TUPLE3 -> putByteString "\135"
@@ -299,7 +300,6 @@ encodeLong1 i = do
       f j | j < 256 = [fromIntegral j]
           | otherwise = let (n, r) = j `divMod` 256 in fromIntegral r : f n
       e = 256 ^ length xs
-      m = e `div` 2 - 1
   if i < 0
     then do
       if (abs i) > e `div` 2
@@ -561,7 +561,7 @@ binput' value = do
 pickleDict :: Map Value Value -> Pickler ()
 pickleDict d = do
   tell [EMPTY_DICT]
-  binput' (Dict M.empty)
+  binput' (Dict d)
 
   let kvs = M.toList d
   case kvs of
@@ -575,7 +575,7 @@ pickleDict d = do
 pickleList :: [Value] -> Pickler ()
 pickleList xs = do
   tell [EMPTY_LIST]
-  binput' (List [])
+  binput' (List xs)
 
   case xs of
     [] -> return ()
@@ -602,7 +602,11 @@ pickleTuple [a, b, c] = do
   pickle' c
   tell [TUPLE3]
   binput' (Tuple [a, b, c])
-pickleTuple _ = error "pickleTuple n TODO"
+pickleTuple xs = do
+  tell [MARK]
+  mapM_ pickle' xs
+  tell [TUPLE]
+  binput' (Tuple xs)
 
 pickleBinInt :: Int -> Pickler ()
 pickleBinInt i | i >= 0 && i < 256 = tell [BININT1 i]

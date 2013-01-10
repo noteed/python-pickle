@@ -74,6 +74,9 @@ expressions =
   , ("(1,)", Tuple [BinInt 1])
   , ("(1, 2)", Tuple [BinInt 1, BinInt 2])
   , ("(1, 2, 3)", Tuple [BinInt 1, BinInt 2, BinInt 3])
+  , ("(1, 2, 3, 4)", Tuple [BinInt 1, BinInt 2, BinInt 3, BinInt 4])
+  , ("((), [], [3, 4], {})",
+    Tuple [Tuple [], List [], List [BinInt 3, BinInt 4], Dict M.empty])
 
   , ("None", None)
   , ("True", Bool True)
