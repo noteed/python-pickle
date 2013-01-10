@@ -274,6 +274,7 @@ serialize opcode = case opcode of
   EMPTY_TUPLE -> putByteString ")"
   TUPLE1 -> putByteString "\133"
   TUPLE2 -> putByteString "\134"
+  TUPLE3 -> putByteString "\135"
   MARK -> putByteString "("
   SETITEM -> putByteString "s"
   SETITEMS -> putByteString "u"
@@ -484,6 +485,7 @@ executeOne MARK stack memo = return (MarkObject:stack, memo)
 executeOne TUPLE stack memo = executeTuple [] stack memo
 executeOne TUPLE1 (a:stack) memo = return (Tuple [a]:stack, memo)
 executeOne TUPLE2 (b:a:stack) memo = return (Tuple [a, b]:stack, memo)
+executeOne TUPLE3 (c:b:a:stack) memo = return (Tuple [a, b, c]:stack, memo)
 executeOne DICT stack memo = executeDict [] stack memo
 executeOne SETITEM stack memo = executeSetitem stack memo
 executeOne SETITEMS stack memo = executeSetitems [] stack memo
@@ -594,6 +596,12 @@ pickleTuple [a, b] = do
   pickle' b
   tell [TUPLE2]
   binput' (Tuple [a, b])
+pickleTuple [a, b, c] = do
+  pickle' a
+  pickle' b
+  pickle' c
+  tell [TUPLE3]
+  binput' (Tuple [a, b, c])
 pickleTuple _ = error "pickleTuple n TODO"
 
 pickleBinInt :: Int -> Pickler ()
