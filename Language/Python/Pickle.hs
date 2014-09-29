@@ -155,8 +155,8 @@ popmark = string "1" *> return POP_MARK
 -- Memo manipulation
 
 get', binget, long_binget, put', binput, long_binput :: Parser OpCode
-get' = string "g" *> return GET
-binget = string "h" *> (BINGET <$> undefined)
+get' = string "g" *> (GET <$> decimalInt)
+binget = string "h" *> (BINGET . fromIntegral <$> anyWord8)
 long_binget = string "j" *> (LONG_BINGET <$> undefined)
 put' = string "p" *> (PUT <$> decimalInt)
 binput = string "q" *> (BINPUT . fromIntegral <$> anyWord8)
@@ -255,6 +255,7 @@ uint2 = do
 
 serialize :: OpCode -> Put
 serialize opcode = case opcode of
+  BINGET i -> putByteString "h" >> putWord8 (fromIntegral i)
   BINPUT i -> putByteString "q" >> putWord8 (fromIntegral i)
   BININT i -> putByteString "J" >> putWord32le (fromIntegral i)
   BININT1 i -> putByteString "K" >> putWord8 (fromIntegral i)
@@ -380,7 +381,7 @@ data OpCode =
   | POP_MARK
 
   -- Memo manipulation
-  | GET
+  | GET Int
   | BINGET Int
   | LONG_BINGET Int
   | PUT Int
@@ -467,7 +468,9 @@ executeOne EMPTY_DICT stack memo = return (Dict M.empty: stack, memo)
 executeOne EMPTY_LIST stack memo = return (List []: stack, memo)
 executeOne EMPTY_TUPLE stack memo = return (Tuple []: stack, memo)
 executeOne (PUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
+executeOne (GET i) stack memo = executeLookup i stack memo
 executeOne (BINPUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
+executeOne (BINGET i) stack memo = executeLookup i stack memo
 executeOne NONE stack memo = return (None:stack, memo)
 executeOne NEWTRUE stack memo = return (Bool True:stack, memo)
 executeOne NEWFALSE stack memo = return (Bool False:stack, memo)
@@ -495,6 +498,11 @@ executeOne APPENDS stack memo = executeAppends [] stack memo
 executeOne (PROTO _) stack memo = return (stack, memo)
 executeOne STOP stack memo = Right (stack, memo)
 executeOne op _ _ = Left $ "Can't execute opcode " ++ show op ++ "."
+
+executeLookup :: Int -> Stack -> Memo -> Either String (Stack, Memo)
+executeLookup k stack memo = case IM.lookup k memo of
+  Nothing -> Left "Unknown memo key"
+  Just s -> Right (s:stack, memo)
 
 executeTuple :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
 executeTuple l (MarkObject:stack) memo = return (Tuple l:stack, memo)
@@ -537,18 +545,22 @@ runPickler :: Pickler () -> [OpCode]
 runPickler p = evalState (execWriterT (runP p)) M.empty
 
 pickle' :: Value -> Pickler ()
-pickle' value = case value of
-  Dict d -> pickleDict d
-  List xs -> pickleList xs
-  Tuple xs -> pickleTuple xs
-  None -> tell [NONE]
-  Bool True -> tell [NEWTRUE]
-  Bool False -> tell [NEWFALSE]
-  BinInt i -> pickleBinInt i
-  BinLong i -> pickleBinLong i
-  BinFloat d -> pickleBinFloat d
-  BinString s -> pickleBinString s
-  x -> error $ "TODO: pickle " ++ show x
+pickle' value = do
+  m <- get
+  case M.lookup value m of
+    Just k -> tell [BINGET k]
+    Nothing -> case value of
+      Dict d -> pickleDict d
+      List xs -> pickleList xs
+      Tuple xs -> pickleTuple xs
+      None -> tell [NONE]
+      Bool True -> tell [NEWTRUE]
+      Bool False -> tell [NEWFALSE]
+      BinInt i -> pickleBinInt i
+      BinLong i -> pickleBinLong i
+      BinFloat d -> pickleBinFloat d
+      BinString s -> pickleBinString s
+      x -> error $ "TODO: pickle " ++ show x
 
 -- TODO actually lookup values in the map, reusing their key.
 binput' :: Value -> Pickler ()

@@ -93,6 +93,7 @@ expressions =
             , BinString "foo")
           ])
   , ("[(1, 2)]", List [Tuple [BinInt 1, BinInt 2]])
+  , ("('twice', 'twice')", Tuple [BinString "twice", BinString "twice"])
   ]
   ++ map (show &&& BinInt) ints
   ++ map (show &&& BinFloat) doubles
