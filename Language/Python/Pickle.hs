@@ -539,7 +539,7 @@ addToDict l (Dict d) = Dict $ foldl' add d l
 ----------------------------------------------------------------------
 
 newtype Pickler a = Pickler { runP :: WriterT [OpCode] (State (Map Value Int)) a }
-  deriving (Monad, MonadWriter [OpCode], MonadState (Map Value Int))
+  deriving (Functor, Applicative, Monad, MonadWriter [OpCode], MonadState (Map Value Int))
 
 runPickler :: Pickler () -> [OpCode]
 runPickler p = evalState (execWriterT (runP p)) M.empty
