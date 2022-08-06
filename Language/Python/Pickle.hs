@@ -11,6 +11,7 @@ import qualified Data.ByteString as S
 import Data.Attoparsec.ByteString hiding (parse, take)
 import qualified Data.Attoparsec.ByteString as A
 import Data.Attoparsec.ByteString.Char8 (decimal, double, signed)
+import Data.Functor (($>), (<&>))
 import Data.Int (Int32, Int64)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
@@ -19,6 +20,8 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Serialize.Get (getWord16le, getInt32le, getWord64be, getInt64le, runGet)
 import Data.Serialize.Put (runPut, putByteString, putWord8, putWord16le, putWord32le, putWord64be, Put)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Data.Word (Word64)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (castPtr)
@@ -80,14 +83,18 @@ binint = string "J" *> (BININT . fromIntegral <$> anyInt32)
 binint1 = string "K" *> (BININT1 . fromIntegral <$> anyWord8)
 binint2 = string "M" *> (BININT2 <$> uint2)
 long = string "L" *> (LONG <$> decimalLong)
-long1 = string "\138" *> (LONG1 <$> decodeLong1) -- same as \x8a
-long4 = string "\139" *> (LONG4 <$> decodeLong4) -- same as \x8b
+long1 = string "\138" *> (LONG1 <$> decodeLong1)
+long4 = string "\139" *> (LONG4 <$> decodeLong4)
 
 -- Strings
 
 string', binstring, shortBinstring, binbytes, shortBinbytes, binbytes8, bytearray8 :: Parser OpCode
 string' = string "S" *> (STRING <$> stringnl)
-binstring = string "T" *> (BINSTRING <$> undefined)
+binstring = do
+  _ <- string "T"
+  i <- fromIntegral <$> anyInt32
+  s <- A.take i
+  return $ BINSTRING s
 shortBinstring = do
   _ <- string "U"
   i <- fromIntegral <$> anyWord8
@@ -118,27 +125,35 @@ bytearray8 = do
 -- None
 
 none :: Parser OpCode
-none = string "N" *> return NONE
+none = string "N" $> NONE
 
 -- Booleans
 
 true, false, newtrue, newfalse :: Parser OpCode
-true = string "I01" *> return NEWTRUE
-false = string "I00" *> return NEWFALSE
-newtrue = string "\136" *> return NEWTRUE -- same as \x88
-newfalse = string "\137" *> return NEWFALSE -- same as \x89
+true = string "I01" $> NEWTRUE
+false = string "I00" $> NEWFALSE
+newtrue = string "\136" $> NEWTRUE -- same as \x88
+newfalse = string "\137" $> NEWFALSE -- same as \x89
 
 -- Unicode strings
 
 unicode, binunicode, shortBinunicode, binunicode8 :: Parser OpCode
-unicode = string "V" *> (UNICODE <$> undefined)
-binunicode = string "X" *> (BINUNICODE <$> undefined)
+unicode = string "V" *> (UNICODE . T.decodeUtf8 <$> stringnl')
+binunicode = do
+  _ <- string "X"
+  i <- fromIntegral <$> anyInt32
+  s <- A.take i
+  return $ BINUNICODE s
 shortBinunicode = do
   _ <- string "\140"
   i <- fromIntegral <$> anyWord8
   s <- A.take i
   return $ SHORT_BINUNICODE s
-binunicode8 = string "\141" *> (SHORT_BINUNICODE <$> undefined)
+binunicode8 = do
+  _ <- string "\138"
+  i <- fromIntegral <$> anyInt64
+  s <- A.take i
+  return $ BINUNICODE8 s
 
 -- Floats
 
@@ -149,116 +164,127 @@ binfloat = string "G" *> (BINFLOAT <$> float8)
 -- Lists
 
 emptyList, append, appends, list :: Parser OpCode
-emptyList = string "]" *> return EMPTY_LIST
-append = string "a" *> return APPEND
-appends = string "e" *> return APPENDS
-list = string "l" *> return LIST
+emptyList = string "]" $> EMPTY_LIST
+append = string "a" $> APPEND
+appends = string "e" $> APPENDS
+list = string "l" $> LIST
 
 -- Tuples
 
 emptyTuple, tuple, tuple1, tuple2, tuple3 :: Parser OpCode
-emptyTuple = string ")" *> return EMPTY_TUPLE
-tuple = string "t" *> return TUPLE
-tuple1 = string "\133" *> return TUPLE1 -- same as \x85
-tuple2 = string "\134" *> return TUPLE2 -- same as \x86
-tuple3 = string "\135" *> return TUPLE3 -- same as \x87
+emptyTuple = string ")" $> EMPTY_TUPLE
+tuple = string "t" $> TUPLE
+tuple1 = string "\133" $> TUPLE1 -- same as \x85
+tuple2 = string "\134" $> TUPLE2 -- same as \x86
+tuple3 = string "\135" $> TUPLE3 -- same as \x87
 
 -- Dictionaries
 
 emptyDict, dict :: Parser OpCode
-emptyDict = string "}" *> return EMPTY_DICT
-dict = string "d" *> return DICT
+emptyDict = string "}" $> EMPTY_DICT
+dict = string "d" $> DICT
 
 -- Sets
 
 setitem, setitems, emptySet, additems, frozenset :: Parser OpCode
-setitem = string "s" *> return SETITEM
-setitems = string "u" *> return SETITEMS
-emptySet = string "\143" *> return EMPTY_SET
-additems = string "\144" *> return ADDITEMS
-frozenset = string "\145" *> return FROZENSET
+setitem = string "s" $> SETITEM
+setitems = string "u" $> SETITEMS
+emptySet = string "\143" $> EMPTY_SET
+additems = string "\144" $> ADDITEMS
+frozenset = string "\145" $> FROZENSET
 
 -- Stack manipulation
 
 pop, dup, mark, popmark, stackGlobal :: Parser OpCode
-pop = string "0" *> return POP
-dup = string "2" *> return DUP
-mark = string "(" *> return MARK
-popmark = string "1" *> return POP_MARK
-stackGlobal = string "\147" *> return STACK_GLOBAL
+pop = string "0" $> POP
+dup = string "2" $> DUP
+mark = string "(" $> MARK
+popmark = string "1" $> POP_MARK
+stackGlobal = string "\147" $> STACK_GLOBAL
 
 -- Memo manipulation
 
 get', binget, longBinget, put', binput, longBinput, memoize :: Parser OpCode
-get' = string "g" *> (GET <$> decimalInt)
+get' = string "g" *> (GET <$> (signed decimal <* string "\n"))
 binget = string "h" *> (BINGET . fromIntegral <$> anyWord8)
-longBinget = string "j" *> (LONG_BINGET <$> undefined)
-put' = string "p" *> (PUT <$> decimalInt)
+longBinget = string "j" *> (LONG_BINGET . fromIntegral <$> anyInt32)
+put' = string "p" *> (PUT <$> (signed decimal <* string "\n"))
 binput = string "q" *> (BINPUT . fromIntegral <$> anyWord8)
-longBinput = string "r" *> (LONG_BINPUT <$> undefined)
-memoize = string "\148" *> return MEMOIZE
+longBinput = string "r" *> (LONG_BINPUT . fromIntegral <$> anyInt32)
+memoize = string "\148" $> MEMOIZE
 
 -- Extension registry (predefined objects)
 
 ext1, ext2, ext4 :: Parser OpCode
-ext1 = string "\130" *> (EXT1 <$> undefined) -- same as \x82
-ext2 = string "\131" *> (EXT2 <$> undefined) -- same as \x83
-ext4 = string "\132" *> (EXT4 <$> undefined) -- same as \x84
+ext1 = string "\130" *> (EXT1 . fromIntegral <$> anyWord8)
+ext2 = string "\131" *> (EXT2 . fromIntegral <$> uint2)
+ext4 = string "\132" *> (EXT4 . fromIntegral <$> anyInt32)
 
 -- Various
 
 global, reduce, build, inst, obj, newobj, newobjEx, frame, nextBuffer, readonlyBuffer :: Parser OpCode
-global = string "c" *> (uncurry GLOBAL <$> undefined)
-reduce = string "R" *> return REDUCE
-build = string "b" *> return BUILD
+global = string "c" *> (GLOBAL <$> stringnl' <*> stringnl')
+reduce = string "R" $> REDUCE
+build = string "b" $> BUILD
 inst = string "i" *> (uncurry INST <$> undefined)
-obj = string "o" *> return OBJ
-newobj = string "\129" *> return NEWOBJ -- same as \x81
-newobjEx = string "\146" *> return NEWOBJ_EX
+obj = string "o" $> OBJ
+newobj = string "\129" $> NEWOBJ -- same as \x81
+newobjEx = string "\146" $> NEWOBJ_EX
 frame = string "\149" *> (FRAME <$> anyInt64)
-nextBuffer = string "\151" *> return NEXT_BUFFER
-readonlyBuffer = string "\152" *> return READONLY_BUFFER
+nextBuffer = string "\151" $> NEXT_BUFFER
+readonlyBuffer = string "\152" $> READONLY_BUFFER
 
 -- Machine control
 
 proto, stop :: Parser OpCode
 proto = string "\128" *> (PROTO . fromIntegral <$> anyWord8)
-stop = string "." *> return STOP
+stop = string "." $> STOP
 
 -- Persistent IDs
 
 persid, binpersid :: Parser OpCode
-persid = string "P" *> (PERSID <$> undefined)
-binpersid = string "Q" *> return BINPERSID
+persid = string "P" *> (PERSID <$> stringnl')
+binpersid = string "Q" $> BINPERSID
 
 -- Basic parsers
 
-decimalInt :: Parser Int
+decimalInt :: Parser Integer
 decimalInt = signed decimal <* string "\n"
 
 -- TODO document the differences with Python's representation.
+doubleFloat :: Parser Double
 doubleFloat = double <* string "\n"
 
-decimalLong :: Parser Int
+decimalLong :: Parser Integer
 decimalLong = signed decimal <* string "L\n"
 
-decodeLong1 :: Parser Int
+decodeLong1 :: Parser Integer
 decodeLong1 = do
   n <- fromIntegral <$> anyWord8
   if n > 0
-    then do
-      ns <- A.take n
-      let a = fst . fst $ toLong ns
-      return $ if S.last ns > 127 then negate $ 256 ^ S.length ns - a else a
+    then A.take n <&> byteStringLEToInteger
     else return 0
-  where toLong = S.mapAccumL (\(a, b) w -> ((a + 256 ^ b * fromIntegral w, b + 1), w)) (0, 0)
 
-decodeLong4 = undefined -- TODO
+decodeLong4 :: Parser Integer
+decodeLong4 = do
+  n <- fromIntegral <$> anyInt32
+  if n > 0
+    then A.take n <&> byteStringLEToInteger
+    else return 0
 
--- TODO escaping not implemented.
+byteStringLEToInteger :: S.ByteString -> Integer
+byteStringLEToInteger bs = if S.last bs > 127 then negate $ 256 ^ S.length bs - res else res
+    where res = fst . fst $ toLong bs
+          toLong :: S.ByteString -> ((Integer, Integer), S.ByteString)
+          toLong = S.mapAccumL (\(a, b) w -> ((a + 256 ^ b * fromIntegral w, b + 1), w)) (0, 0)
+
+stringnl :: Parser S.ByteString
 stringnl = choice
   [ string "'" *> takeTill (== 39) <* string "'\n"
   ]
+
+stringnl' :: Parser S.ByteString
+stringnl' = takeTill (==10) <* string "\n"
 
 float8 :: Parser Double
 float8 = do
@@ -286,7 +312,7 @@ anyInt64 = do
     Right x -> return x
 
 
-uint2 :: Parser Int
+uint2 :: Parser Integer
 uint2 = do
   w <- runGet getWord16le <$> A.take 2
   case w of
@@ -335,10 +361,10 @@ putFloat8 d = putWord64be (coerce d)
     coerce x = unsafePerformIO $ with x $ \p ->
       peek (castPtr p) :: IO Word64
 
-putUint2 :: Int -> Put
+putUint2 :: Integer -> Put
 putUint2 d = putWord16le (fromIntegral d)
 
-encodeLong1 :: Int -> Put
+encodeLong1 :: Integer -> Put
 encodeLong1 i = do
   -- TODO is it possible to know xs length without really constructing xs?
   let xs = f $ abs i
@@ -347,7 +373,7 @@ encodeLong1 i = do
       e = 256 ^ length xs
   if i < 0
     then do
-      if (abs i) > e `div` 2
+      if abs i > e `div` 2
         then do
           putWord8 (fromIntegral $ length xs + 1)
           mapM_ putWord8 $ f (e + i)
@@ -371,13 +397,13 @@ encodeLong1 i = do
 
 data OpCode =
   -- Integers
-    INT Int
-  | BININT Int
-  | BININT1 Int
-  | BININT2 Int
-  | LONG Int
-  | LONG1 Int
-  | LONG4 Int
+    INT Integer
+  | BININT Integer
+  | BININT1 Integer
+  | BININT2 Integer
+  | LONG Integer
+  | LONG1 Integer
+  | LONG4 Integer
 
   -- Strings
   | STRING S.ByteString
@@ -396,10 +422,10 @@ data OpCode =
   | NEWFALSE
 
   -- Unicode strings
-  | UNICODE S.ByteString -- TODO (use Text ?)
+  | UNICODE T.Text
   | BINUNICODE S.ByteString
   | SHORT_BINUNICODE S.ByteString
-  | BINUNICODE8
+  | BINUNICODE8 S.ByteString
 
   -- Floats
   | FLOAT Double
@@ -439,10 +465,10 @@ data OpCode =
   -- Memo manipulation
   | GET Int
   | BINGET Int
-  | LONG_BINGET Int
+  | LONG_BINGET Integer
   | PUT Int
   | BINPUT Int
-  | LONG_BINPUT Int
+  | LONG_BINPUT Integer
   | MEMOIZE
 
   -- Extension registry (predefined objects)
@@ -497,8 +523,8 @@ data Value =
   | Tuple [Value]
   | None
   | Bool Bool
-  | BinInt Int
-  | BinLong Int
+  | BinInt Integer
+  | BinLong Integer
   | BinFloat Double
   | BinString S.ByteString
   | MarkObject -- Urk, not really a value.
@@ -572,32 +598,40 @@ executeLookup k stack memo = case IM.lookup k memo of
 executeTuple :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
 executeTuple l (MarkObject:stack) memo = return (Tuple l:stack, memo)
 executeTuple l (a:stack) memo = executeTuple (a : l) stack memo
+executeTuple _ _ _ = error "Empty stack in executeTuple"
 
 executeDict :: Monad m => [(Value, Value)] -> Stack -> Memo -> m ([Value], Memo)
 executeDict l (MarkObject:stack) memo = return (l `addToDict` Dict M.empty:stack, memo)
 executeDict l (a:b:stack) memo = executeDict ((b, a) : l) stack memo
+executeDict _ _ _ = error "Empty stack in executeDict"
 
 executeList :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
 executeList l (MarkObject:stack) memo = return (List l:stack, memo)
 executeList l (x:stack) memo = executeList (x : l) stack memo
+executeList _ _ _ = error "Empty stack in executeList"
 
 executeSetitem :: Monad m => Stack -> Memo -> m ([Value], Memo)
 executeSetitem (v:k:Dict d:stack) memo = return (Dict (M.insert k v d):stack, memo)
+executeSetitem _ _ = error "Empty stack in executeSetitem"
 
 executeSetitems :: Monad m => [(Value, Value)] -> Stack -> Memo -> m ([Value], Memo)
 executeSetitems l (MarkObject:Dict d:stack) memo = return (l `addToDict` Dict d:stack, memo)
 executeSetitems l (a:b:stack) memo = executeSetitems ((b, a) : l) stack memo
+executeSetitems _ _ _ = error "Empty stack in executeSetitems"
 
 executeAppend :: Monad m => Stack -> Memo -> m ([Value], Memo)
 executeAppend (x:List xs:stack) memo = return (List (xs ++ [x]):stack, memo)
+executeAppend _ _ = error "Empty stack in executeAppend"
 
 executeAppends :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
 executeAppends l (MarkObject:List xs:stack) memo = return (List (xs ++ l):stack, memo)
 executeAppends l (x:stack) memo = executeAppends (x : l) stack memo
+executeAppends _ _ _ = error "Empty stack in executeAppends"
 
 addToDict :: [(Value, Value)] -> Value -> Value
 addToDict l (Dict d) = Dict $ foldl' add d l
   where add d' (k, v) = M.insert k v d'
+addToDict _ _ = error "Second argument to addToDict must be a dict"
 
 ----------------------------------------------------------------------
 -- Pickling (value to opcodes)
@@ -685,12 +719,12 @@ pickleTuple xs = do
   tell [TUPLE]
   binput' (Tuple xs)
 
-pickleBinInt :: Int -> Pickler ()
+pickleBinInt :: Integer -> Pickler ()
 pickleBinInt i | i >= 0 && i < 256 = tell [BININT1 i]
                | i >= 256 && i < 65536 = tell [BININT2 i]
                | otherwise = tell [BININT i]
 
-pickleBinLong :: Int -> Pickler ()
+pickleBinLong :: Integer -> Pickler ()
 pickleBinLong i = tell [LONG1 i] -- TODO LONG/LONG1/LONG4
 
 -- TODO probably depends on the float range
@@ -722,3 +756,4 @@ dictGetString :: Value -> S.ByteString -> Either String S.ByteString
 dictGetString (Dict d) s = case M.lookup (BinString s) d of
   Just (BinString s') -> return s'
   _ -> Left "dictGetString: not a dict, or no such key."
+dictGetString _ _ = error "Can only run dictGetString on a Dict."

@@ -32,6 +32,12 @@ tests =
       map (\(a, b) -> testCase a $ testAgainstPython 1 b a) expressions
   , testGroup "PickledValues protocol 2" $
       map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
+  , testGroup "PickledValues protocol 3" $
+      map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
+  , testGroup "PickledValues protocol 4" $
+      map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
+  , testGroup "PickledValues protocol 5" $
+      map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
   ]
 
 -- The round-tripping (unpickling/pickling and comparing the original
@@ -100,7 +106,7 @@ expressions =
   ++ map (quote . C.unpack &&& BinString) strings
   ++ map ((++ "L") . show &&& BinLong) ints
 
-ints :: [Int]
+ints :: [Integer]
 ints =
   [0, 10..100] ++ [100, 150..1000] ++
   [1000, 1500..10000] ++ [10000, 50000..1000000] ++
