@@ -19,7 +19,8 @@ import qualified Data.IntMap as IM
 import Data.List (foldl')
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Serialize.Get (getWord16le, getInt32le, getWord64be, getInt64le, runGet)
+import Data.Serialize.Get (getWord16le, getInt32le, getInt64le, runGet)
+import Data.Serialize.IEEE754 (getFloat64be)
 import Data.Serialize.Put (runPut, putByteString, putWord8, putWord16le, putWord32le, putWord64be, Put)
 import qualified Data.Set as SET
 import qualified Data.Text as T
@@ -259,16 +260,13 @@ stringnl = choice
 stringnl' :: Parser S.ByteString
 stringnl' = takeTill (==10) <* string "\n"
 
+
 float8 :: Parser Double
 float8 = do
-  w <- runGet getWord64be <$> A.take 8
+  w <- runGet getFloat64be <$> A.take 8
   case w of
     Left err -> fail err
-    Right x -> return $ coerce x
-  where
-  coerce :: Word64 -> Double
-  coerce x = unsafePerformIO $ with x $ \p ->
-    peek (castPtr p) :: IO Double
+    Right x -> return x
 
 anyInt32 :: Parser Int32
 anyInt32 = do

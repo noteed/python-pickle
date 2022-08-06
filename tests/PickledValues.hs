@@ -100,6 +100,7 @@ expressions =
           ])
   , ("[(1, 2)]", List [Tuple [BinInt 1, BinInt 2]])
   , ("('twice', 'twice')", Tuple [BinString "twice", BinString "twice"])
+  , ("{'pi': 3.14159}", Dict $ M.fromList [(BinString "pi", BinFloat 3.14159)])
   ]
   ++ map (show &&& BinInt) ints
   ++ map (show &&& BinFloat) doubles
