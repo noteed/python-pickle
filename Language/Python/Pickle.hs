@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | Very partial implementation of the Python Pickle Virtual Machine
 -- (protocol 2): i.e. parses pickled data into opcodes, then executes the
@@ -20,6 +21,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Serialize.Get (getWord16le, getInt32le, getWord64be, getInt64le, runGet)
 import Data.Serialize.Put (runPut, putByteString, putWord8, putWord16le, putWord32le, putWord64be, Put)
+import qualified Data.Set as SET
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Word (Word64)
@@ -521,6 +523,7 @@ data Value =
     Dict (Map Value Value)
   | List [Value]
   | Tuple [Value]
+  | Set (SET.Set Value)
   | None
   | Bool Bool
   | BinInt Integer
@@ -588,6 +591,23 @@ executeOne APPEND stack memo = executeAppend stack memo
 executeOne APPENDS stack memo = executeAppends [] stack memo
 executeOne (PROTO _) stack memo = return (stack, memo)
 executeOne STOP stack memo = Right (stack, memo)
+executeOne (BINBYTES b) stack memo = return (BinString b:stack, memo)
+executeOne (SHORT_BINBYTES b) stack memo = return (BinString b:stack, memo)
+executeOne (SHORT_BINUNICODE b) stack memo = return (BinString b:stack, memo)
+executeOne (BINUNICODE8 b) stack memo = return (BinString b:stack, memo)
+executeOne (BINBYTES8 b) stack memo = return (BinString b:stack, memo)
+executeOne EMPTY_SET stack memo = return (Set SET.empty:stack, memo)
+executeOne ADDITEMS stack memo = return (Set newS:rest, memo)
+  where (items,Set s:rest) = span (\case
+                  (Set _) -> False
+                  _       -> True) stack
+        newS = foldr SET.insert s items 
+executeOne FROZENSET _ _ = error "FROZENSET unimplemented"
+executeOne NEWOBJ_EX _ _ = error "NEWOBJ_EX unimplemented"
+executeOne STACK_GLOBAL _ _ = error "STACK_GLOBAL unimplemented"
+executeOne MEMOIZE (s:stack) memo = return (s:stack, IM.insert (IM.size memo) s memo)
+executeOne (FRAME _) stack memo = return (stack, memo)
+
 executeOne op _ _ = Left $ "Can't execute opcode " ++ show op ++ "."
 
 executeLookup :: Int -> Stack -> Memo -> Either String (Stack, Memo)
