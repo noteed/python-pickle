@@ -1,7 +1,7 @@
 # python-pickle
 
 python-pickle is a Haskell library to serialize and deserialize Python objects
-using the Python Pickle format. It supports protocols 0, 1, and 2 for
+using the Python Pickle format. It supports protocols 0-5 for
 deserializing and uses protocol 2 for serialization.
 
 It offers a `Value` data type to represent Python objects, and two functions,
