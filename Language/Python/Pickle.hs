@@ -776,4 +776,4 @@ dictGetString :: Value -> S.ByteString -> Either String S.ByteString
 dictGetString (Dict d) s = case M.lookup (BinString s) d of
   Just (BinString s') -> return s'
   _ -> Left "dictGetString: not a dict, or no such key."
-dictGetString _ _ = error "Can only run dictGetString on a Dict."
+dictGetString v _ = error ("Can only run dictGetString on a Dict, you run it on " ++ show v ++ ".")
