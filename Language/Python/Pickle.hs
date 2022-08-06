@@ -92,36 +92,12 @@ long4 = string "\139" *> (LONG4 <$> decodeLong4)
 
 string', binstring, shortBinstring, binbytes, shortBinbytes, binbytes8, bytearray8 :: Parser OpCode
 string' = string "S" *> (STRING <$> stringnl)
-binstring = do
-  _ <- string "T"
-  i <- fromIntegral <$> anyInt32
-  s <- A.take i
-  return $ BINSTRING s
-shortBinstring = do
-  _ <- string "U"
-  i <- fromIntegral <$> anyWord8
-  s <- A.take i
-  return $ SHORT_BINSTRING s
-binbytes = do
-  _ <- string "B"
-  i <- fromIntegral <$> anyInt32
-  s <- A.take i
-  return $ BINBYTES s
-shortBinbytes = do
-  _ <- string "C"
-  i <- fromIntegral <$> anyWord8
-  s <- A.take i
-  return $ SHORT_BINBYTES s
-binbytes8 = do
-  _ <- string "\142"
-  i <- fromIntegral <$> anyInt64
-  s <- A.take i
-  return $ BINBYTES8 s
-bytearray8 = do
-  _ <- string "\150"
-  i <- fromIntegral <$> anyInt64
-  s <- A.take i
-  return $ BYTEARRAY8 s
+binstring = readSizedVal "T" anyInt32 BINSTRING
+shortBinstring = readSizedVal "U" anyWord8 SHORT_BINSTRING
+binbytes = readSizedVal "B" anyInt32 BINBYTES
+shortBinbytes = readSizedVal "C" anyWord8 SHORT_BINBYTES
+binbytes8 = readSizedVal "\142" anyInt64 BINBYTES8
+bytearray8 = readSizedVal "\150" anyInt64 BYTEARRAY8
 
 
 -- None
@@ -141,21 +117,9 @@ newfalse = string "\137" $> NEWFALSE -- same as \x89
 
 unicode, binunicode, shortBinunicode, binunicode8 :: Parser OpCode
 unicode = string "V" *> (UNICODE . T.decodeUtf8 <$> stringnl')
-binunicode = do
-  _ <- string "X"
-  i <- fromIntegral <$> anyInt32
-  s <- A.take i
-  return $ BINUNICODE s
-shortBinunicode = do
-  _ <- string "\140"
-  i <- fromIntegral <$> anyWord8
-  s <- A.take i
-  return $ SHORT_BINUNICODE s
-binunicode8 = do
-  _ <- string "\138"
-  i <- fromIntegral <$> anyInt64
-  s <- A.take i
-  return $ BINUNICODE8 s
+binunicode = readSizedVal "X" anyInt32 BINUNICODE
+shortBinunicode = readSizedVal "\140" anyWord8 SHORT_BINUNICODE
+binunicode8 = readSizedVal "\138" anyInt64 BINUNICODE8
 
 -- Floats
 
@@ -249,6 +213,13 @@ persid = string "P" *> (PERSID <$> stringnl')
 binpersid = string "Q" $> BINPERSID
 
 -- Basic parsers
+
+readSizedVal :: (Integral i) => S.ByteString -> Parser i -> (S.ByteString -> r) -> Parser r
+readSizedVal opcode sizeParser constructor = do
+  _ <- string opcode
+  i <- fromIntegral <$> sizeParser
+  s <- A.take i
+  return $ constructor s
 
 decimalInt :: Parser Integer
 decimalInt = signed decimal <* string "\n"
