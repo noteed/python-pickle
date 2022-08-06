@@ -19,7 +19,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Serialize.Get (getWord16le, getInt32le, getWord64be, getInt64le, runGet)
 import Data.Serialize.Put (runPut, putByteString, putWord8, putWord16le, putWord32le, putWord64be, Put)
-import Data.Word (Word32, Word64)
+import Data.Word (Word64)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (castPtr)
 import Foreign.Storable (peek)
@@ -55,19 +55,19 @@ opcodes =
   -- true and false are in fact special cases for the int parser,
   -- It is important they are tried before int.
   [ true, false, int, binint, binint1, binint2, long, long1, long4
-  , string', binstring, short_binstring, binbytes, short_binbytes, binbytes8, bytearray8
+  , string', binstring, shortBinstring, binbytes, shortBinbytes, binbytes8, bytearray8
   , none
   , newtrue, newfalse
-  , unicode, binunicode, short_binunicode, binunicode8
+  , unicode, binunicode, shortBinunicode, binunicode8
   , float, binfloat
-  , empty_list, append, appends, list
-  , empty_tuple, tuple, tuple1, tuple2, tuple3
-  , empty_dict, dict
-  , setitem, setitems, empty_set, additems, frozenset
-  , pop, dup, mark, popmark, stack_global
-  , get', binget, long_binget, put', binput, long_binput, memoize
+  , emptyList, append, appends, list
+  , emptyTuple, tuple, tuple1, tuple2, tuple3
+  , emptyDict, dict
+  , setitem, setitems, emptySet, additems, frozenset
+  , pop, dup, mark, popmark, stackGlobal
+  , get', binget, longBinget, put', binput, longBinput, memoize
   , ext1, ext2, ext4
-  , global, reduce, build, inst, obj, newobj, newobj_ex, frame, next_buffer, readonly_buffer
+  , global, reduce, build, inst, obj, newobj, newobjEx, frame, nextBuffer, readonlyBuffer
   , proto, stop
   , persid, binpersid
   ]
@@ -85,10 +85,10 @@ long4 = string "\139" *> (LONG4 <$> decodeLong4) -- same as \x8b
 
 -- Strings
 
-string', binstring, short_binstring, binbytes, short_binbytes, binbytes8, bytearray8 :: Parser OpCode
+string', binstring, shortBinstring, binbytes, shortBinbytes, binbytes8, bytearray8 :: Parser OpCode
 string' = string "S" *> (STRING <$> stringnl)
 binstring = string "T" *> (BINSTRING <$> undefined)
-short_binstring = do
+shortBinstring = do
   _ <- string "U"
   i <- fromIntegral <$> anyWord8
   s <- A.take i
@@ -98,7 +98,7 @@ binbytes = do
   i <- fromIntegral <$> anyInt32
   s <- A.take i
   return $ BINBYTES s
-short_binbytes = do
+shortBinbytes = do
   _ <- string "C"
   i <- fromIntegral <$> anyWord8
   s <- A.take i
@@ -130,10 +130,10 @@ newfalse = string "\137" *> return NEWFALSE -- same as \x89
 
 -- Unicode strings
 
-unicode, binunicode, short_binunicode, binunicode8 :: Parser OpCode
+unicode, binunicode, shortBinunicode, binunicode8 :: Parser OpCode
 unicode = string "V" *> (UNICODE <$> undefined)
 binunicode = string "X" *> (BINUNICODE <$> undefined)
-short_binunicode = do
+shortBinunicode = do
   _ <- string "\140"
   i <- fromIntegral <$> anyWord8
   s <- A.take i
@@ -148,16 +148,16 @@ binfloat = string "G" *> (BINFLOAT <$> float8)
 
 -- Lists
 
-empty_list, append, appends, list :: Parser OpCode
-empty_list = string "]" *> return EMPTY_LIST
+emptyList, append, appends, list :: Parser OpCode
+emptyList = string "]" *> return EMPTY_LIST
 append = string "a" *> return APPEND
 appends = string "e" *> return APPENDS
 list = string "l" *> return LIST
 
 -- Tuples
 
-empty_tuple, tuple, tuple1, tuple2, tuple3 :: Parser OpCode
-empty_tuple = string ")" *> return EMPTY_TUPLE
+emptyTuple, tuple, tuple1, tuple2, tuple3 :: Parser OpCode
+emptyTuple = string ")" *> return EMPTY_TUPLE
 tuple = string "t" *> return TUPLE
 tuple1 = string "\133" *> return TUPLE1 -- same as \x85
 tuple2 = string "\134" *> return TUPLE2 -- same as \x86
@@ -165,37 +165,37 @@ tuple3 = string "\135" *> return TUPLE3 -- same as \x87
 
 -- Dictionaries
 
-empty_dict, dict :: Parser OpCode
-empty_dict = string "}" *> return EMPTY_DICT
+emptyDict, dict :: Parser OpCode
+emptyDict = string "}" *> return EMPTY_DICT
 dict = string "d" *> return DICT
 
 -- Sets
 
-setitem, setitems, empty_set, additems, frozenset :: Parser OpCode
+setitem, setitems, emptySet, additems, frozenset :: Parser OpCode
 setitem = string "s" *> return SETITEM
 setitems = string "u" *> return SETITEMS
-empty_set = string "\143" *> return EMPTY_SET
+emptySet = string "\143" *> return EMPTY_SET
 additems = string "\144" *> return ADDITEMS
 frozenset = string "\145" *> return FROZENSET
 
 -- Stack manipulation
 
-pop, dup, mark, popmark :: Parser OpCode
+pop, dup, mark, popmark, stackGlobal :: Parser OpCode
 pop = string "0" *> return POP
 dup = string "2" *> return DUP
 mark = string "(" *> return MARK
 popmark = string "1" *> return POP_MARK
-stack_global = string "\147" *> return STACK_GLOBAL
+stackGlobal = string "\147" *> return STACK_GLOBAL
 
 -- Memo manipulation
 
-get', binget, long_binget, put', binput, long_binput, memoize :: Parser OpCode
+get', binget, longBinget, put', binput, longBinput, memoize :: Parser OpCode
 get' = string "g" *> (GET <$> decimalInt)
 binget = string "h" *> (BINGET . fromIntegral <$> anyWord8)
-long_binget = string "j" *> (LONG_BINGET <$> undefined)
+longBinget = string "j" *> (LONG_BINGET <$> undefined)
 put' = string "p" *> (PUT <$> decimalInt)
 binput = string "q" *> (BINPUT . fromIntegral <$> anyWord8)
-long_binput = string "r" *> (LONG_BINPUT <$> undefined)
+longBinput = string "r" *> (LONG_BINPUT <$> undefined)
 memoize = string "\148" *> return MEMOIZE
 
 -- Extension registry (predefined objects)
@@ -207,17 +207,17 @@ ext4 = string "\132" *> (EXT4 <$> undefined) -- same as \x84
 
 -- Various
 
-global, reduce, build, inst, obj, newobj, newobj_ex, frame, next_buffer, readonly_buffer :: Parser OpCode
+global, reduce, build, inst, obj, newobj, newobjEx, frame, nextBuffer, readonlyBuffer :: Parser OpCode
 global = string "c" *> (uncurry GLOBAL <$> undefined)
 reduce = string "R" *> return REDUCE
 build = string "b" *> return BUILD
 inst = string "i" *> (uncurry INST <$> undefined)
 obj = string "o" *> return OBJ
 newobj = string "\129" *> return NEWOBJ -- same as \x81
-newobj_ex = string "\146" *> return NEWOBJ_EX
+newobjEx = string "\146" *> return NEWOBJ_EX
 frame = string "\149" *> (FRAME <$> anyInt64)
-next_buffer = string "\151" *> return NEXT_BUFFER
-readonly_buffer = string "\152" *> return READONLY_BUFFER
+nextBuffer = string "\151" *> return NEXT_BUFFER
+readonlyBuffer = string "\152" *> return READONLY_BUFFER
 
 -- Machine control
 
