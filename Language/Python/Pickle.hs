@@ -5,20 +5,19 @@
 -- opcodes to construct a (Haskell representation of a) Python object.
 module Language.Python.Pickle where
 
-import Control.Applicative ((<$>), (<*), (*>))
 import Control.Monad.State
 import Control.Monad.Writer
 import qualified Data.ByteString as S
-import Data.Attoparsec hiding (parse, take)
-import qualified Data.Attoparsec as A
+import Data.Attoparsec.ByteString hiding (parse, take)
+import qualified Data.Attoparsec.ByteString as A
 import Data.Attoparsec.ByteString.Char8 (decimal, double, signed)
-import Data.Int (Int32)
+import Data.Int (Int32, Int64)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List (foldl')
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Serialize.Get (getWord16le, getWord32le, getWord64be, runGet)
+import Data.Serialize.Get (getWord16le, getInt32le, getWord64be, getInt64le, runGet)
 import Data.Serialize.Put (runPut, putByteString, putWord8, putWord16le, putWord32le, putWord64be, Put)
 import Data.Word (Word32, Word64)
 import Foreign.Marshal.Utils (with)
@@ -56,18 +55,19 @@ opcodes =
   -- true and false are in fact special cases for the int parser,
   -- It is important they are tried before int.
   [ true, false, int, binint, binint1, binint2, long, long1, long4
-  , string', binstring, short_binstring
+  , string', binstring, short_binstring, binbytes, short_binbytes, binbytes8, bytearray8
   , none
   , newtrue, newfalse
-  , unicode, binunicode
+  , unicode, binunicode, short_binunicode, binunicode8
   , float, binfloat
   , empty_list, append, appends, list
   , empty_tuple, tuple, tuple1, tuple2, tuple3
-  , empty_dict, dict, setitem, setitems
-  , pop, dup, mark, popmark
-  , get', binget, long_binget, put', binput, long_binput
+  , empty_dict, dict
+  , setitem, setitems, empty_set, additems, frozenset
+  , pop, dup, mark, popmark, stack_global
+  , get', binget, long_binget, put', binput, long_binput, memoize
   , ext1, ext2, ext4
-  , global, reduce, build, inst, obj, newobj
+  , global, reduce, build, inst, obj, newobj, newobj_ex, frame, next_buffer, readonly_buffer
   , proto, stop
   , persid, binpersid
   ]
@@ -76,7 +76,7 @@ opcodes =
 
 int, binint, binint1, binint2, long, long1, long4 :: Parser OpCode
 int = string "I" *> (INT <$> decimalInt)
-binint = string "J" *> (BININT <$> int4)
+binint = string "J" *> (BININT . fromIntegral <$> anyInt32)
 binint1 = string "K" *> (BININT1 . fromIntegral <$> anyWord8)
 binint2 = string "M" *> (BININT2 <$> uint2)
 long = string "L" *> (LONG <$> decimalLong)
@@ -85,7 +85,7 @@ long4 = string "\139" *> (LONG4 <$> decodeLong4) -- same as \x8b
 
 -- Strings
 
-string', binstring, short_binstring :: Parser OpCode
+string', binstring, short_binstring, binbytes, short_binbytes, binbytes8, bytearray8 :: Parser OpCode
 string' = string "S" *> (STRING <$> stringnl)
 binstring = string "T" *> (BINSTRING <$> undefined)
 short_binstring = do
@@ -93,6 +93,27 @@ short_binstring = do
   i <- fromIntegral <$> anyWord8
   s <- A.take i
   return $ SHORT_BINSTRING s
+binbytes = do
+  _ <- string "B"
+  i <- fromIntegral <$> anyInt32
+  s <- A.take i
+  return $ BINBYTES s
+short_binbytes = do
+  _ <- string "C"
+  i <- fromIntegral <$> anyWord8
+  s <- A.take i
+  return $ SHORT_BINBYTES s
+binbytes8 = do
+  _ <- string "\142"
+  i <- fromIntegral <$> anyInt64
+  s <- A.take i
+  return $ BINBYTES8 s
+bytearray8 = do
+  _ <- string "\150"
+  i <- fromIntegral <$> anyInt64
+  s <- A.take i
+  return $ BYTEARRAY8 s
+
 
 -- None
 
@@ -109,9 +130,15 @@ newfalse = string "\137" *> return NEWFALSE -- same as \x89
 
 -- Unicode strings
 
-unicode, binunicode :: Parser OpCode
+unicode, binunicode, short_binunicode, binunicode8 :: Parser OpCode
 unicode = string "V" *> (UNICODE <$> undefined)
 binunicode = string "X" *> (BINUNICODE <$> undefined)
+short_binunicode = do
+  _ <- string "\140"
+  i <- fromIntegral <$> anyWord8
+  s <- A.take i
+  return $ SHORT_BINUNICODE s
+binunicode8 = string "\141" *> (SHORT_BINUNICODE <$> undefined)
 
 -- Floats
 
@@ -138,11 +165,18 @@ tuple3 = string "\135" *> return TUPLE3 -- same as \x87
 
 -- Dictionaries
 
-empty_dict, dict, setitem, setitems :: Parser OpCode
+empty_dict, dict :: Parser OpCode
 empty_dict = string "}" *> return EMPTY_DICT
 dict = string "d" *> return DICT
+
+-- Sets
+
+setitem, setitems, empty_set, additems, frozenset :: Parser OpCode
 setitem = string "s" *> return SETITEM
 setitems = string "u" *> return SETITEMS
+empty_set = string "\143" *> return EMPTY_SET
+additems = string "\144" *> return ADDITEMS
+frozenset = string "\145" *> return FROZENSET
 
 -- Stack manipulation
 
@@ -151,16 +185,18 @@ pop = string "0" *> return POP
 dup = string "2" *> return DUP
 mark = string "(" *> return MARK
 popmark = string "1" *> return POP_MARK
+stack_global = string "\147" *> return STACK_GLOBAL
 
 -- Memo manipulation
 
-get', binget, long_binget, put', binput, long_binput :: Parser OpCode
+get', binget, long_binget, put', binput, long_binput, memoize :: Parser OpCode
 get' = string "g" *> (GET <$> decimalInt)
 binget = string "h" *> (BINGET . fromIntegral <$> anyWord8)
 long_binget = string "j" *> (LONG_BINGET <$> undefined)
 put' = string "p" *> (PUT <$> decimalInt)
 binput = string "q" *> (BINPUT . fromIntegral <$> anyWord8)
 long_binput = string "r" *> (LONG_BINPUT <$> undefined)
+memoize = string "\148" *> return MEMOIZE
 
 -- Extension registry (predefined objects)
 
@@ -171,13 +207,17 @@ ext4 = string "\132" *> (EXT4 <$> undefined) -- same as \x84
 
 -- Various
 
-global, reduce, build, inst, obj, newobj :: Parser OpCode
+global, reduce, build, inst, obj, newobj, newobj_ex, frame, next_buffer, readonly_buffer :: Parser OpCode
 global = string "c" *> (uncurry GLOBAL <$> undefined)
 reduce = string "R" *> return REDUCE
 build = string "b" *> return BUILD
 inst = string "i" *> (uncurry INST <$> undefined)
 obj = string "o" *> return OBJ
 newobj = string "\129" *> return NEWOBJ -- same as \x81
+newobj_ex = string "\146" *> return NEWOBJ_EX
+frame = string "\149" *> (FRAME <$> anyInt64)
+next_buffer = string "\151" *> return NEXT_BUFFER
+readonly_buffer = string "\152" *> return READONLY_BUFFER
 
 -- Machine control
 
@@ -231,16 +271,20 @@ float8 = do
   coerce x = unsafePerformIO $ with x $ \p ->
     peek (castPtr p) :: IO Double
 
-int4 :: Parser Int
-int4 = do
-  w <- runGet getWord32le <$> A.take 4
+anyInt32 :: Parser Int32
+anyInt32 = do
+  w <- runGet getInt32le <$> A.take 4
   case w of
     Left err -> fail err
-    Right x -> return . fromIntegral $ coerce x
-  where
-  coerce :: Word32 -> Int32
-  coerce x = unsafePerformIO $ with x $ \p ->
-    peek (castPtr p) :: IO Int32
+    Right x -> return x
+
+anyInt64 :: Parser Int64
+anyInt64 = do
+  w <- runGet getInt64le <$> A.take 8
+  case w of
+    Left err -> fail err
+    Right x -> return x
+
 
 uint2 :: Parser Int
 uint2 = do
@@ -339,6 +383,10 @@ data OpCode =
   | STRING S.ByteString
   | BINSTRING S.ByteString
   | SHORT_BINSTRING S.ByteString
+  | BINBYTES S.ByteString
+  | SHORT_BINBYTES S.ByteString
+  | BINBYTES8 S.ByteString
+  | BYTEARRAY8 S.ByteString
 
   -- None
   | NONE
@@ -350,6 +398,8 @@ data OpCode =
   -- Unicode strings
   | UNICODE S.ByteString -- TODO (use Text ?)
   | BINUNICODE S.ByteString
+  | SHORT_BINUNICODE S.ByteString
+  | BINUNICODE8
 
   -- Floats
   | FLOAT Double
@@ -371,14 +421,20 @@ data OpCode =
   -- Dictionaries
   | EMPTY_DICT
   | DICT
+
+  -- Sets
   | SETITEM
   | SETITEMS
+  | EMPTY_SET
+  | ADDITEMS
+  | FROZENSET
 
   -- Stack manipulation
   | POP
   | DUP
   | MARK
   | POP_MARK
+  | STACK_GLOBAL
 
   -- Memo manipulation
   | GET Int
@@ -387,6 +443,7 @@ data OpCode =
   | PUT Int
   | BINPUT Int
   | LONG_BINPUT Int
+  | MEMOIZE
 
   -- Extension registry (predefined objects)
   | EXT1 Int
@@ -400,6 +457,10 @@ data OpCode =
   | INST S.ByteString S.ByteString
   | OBJ
   | NEWOBJ
+  | NEWOBJ_EX
+  | FRAME Int64
+  | NEXT_BUFFER
+  | READONLY_BUFFER
 
   -- Pickle machine control
   | PROTO Int -- in [2..255]
@@ -419,6 +480,10 @@ protocol1 = [BININT, BININT1, BININT2, BINSTRING, SHORT_BINSTRING, BINUNICODE,
   BINGET, LONG_BINGET, BINPUT, LONG_BINPUT, OBJ, BINPERSID]
 protocol2 = [LONG1, LONG4, NEWTRUE, NEWFALSE, TUPLE1, TUPLE2, TUPLE3, EXT1,
   EXT2, EXT4, NEWOBJ, PROTO]
+protocol3 = [BINBYTES, SHORT_BINBYTES]
+protocol4 = [SHORT_BINUNICODE, BINUNICODE8, BINBYTES8, EMPTY_SET, ADDITEMS,
+  FROZENSET, NEWOBJ_EX, STACK_GLOBAL, MEMOIZE, FRAME]
+protocol5 = [BYTEARRAY8, NEXT_BUFFER, READONLY_BUFFER]
 -}
 
 ----------------------------------------------------------------------
@@ -444,7 +509,7 @@ data Value =
 ----------------------------------------------------------------------
 
 unpickle' :: [OpCode] -> Either String Value
-unpickle' xs = execute xs [] (IM.empty)
+unpickle' xs = execute xs [] IM.empty
 
 type Stack = [Value]
 
