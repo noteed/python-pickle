@@ -813,12 +813,38 @@ instance (FromValue k, FromValue v, Ord k) => FromValue (Map k v) where
             (Just M.empty) m
     fromVal _        = Nothing
 
-instance (FromValue a, FromValue b) => FromValue (a, b) where
+instance (FromValue a, FromValue b) =>
+    FromValue (a, b) where
     fromVal (Tuple [a,b]) = (,) <$> fromVal a <*> fromVal b
     fromVal (List [a,b])  = (,) <$> fromVal a <*> fromVal b
     fromVal _             = Nothing
 
-instance (FromValue a, FromValue b, FromValue c) => FromValue (a, b, c) where
+instance (FromValue a, FromValue b, FromValue c) =>
+    FromValue (a, b, c) where
     fromVal (Tuple [a,b,c]) = (,,) <$> fromVal a <*> fromVal b <*> fromVal c
     fromVal (List [a,b,c])  = (,,) <$> fromVal a <*> fromVal b <*> fromVal c
+    fromVal _             = Nothing
+
+instance (FromValue a, FromValue b, FromValue c, FromValue d) =>
+    FromValue (a, b, c, d) where
+    fromVal (Tuple [a,b,c,d]) = (,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d
+    fromVal (List [a,b,c,d])  = (,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d
+    fromVal _             = Nothing
+
+instance (FromValue a, FromValue b, FromValue c, FromValue d, FromValue e) =>
+    FromValue (a, b, c, d, e) where
+    fromVal (Tuple [a,b,c,d,e]) = (,,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d <*> fromVal e
+    fromVal (List [a,b,c,d,e])  = (,,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d <*> fromVal e
+    fromVal _             = Nothing
+
+instance (FromValue a, FromValue b, FromValue c, FromValue d, FromValue e, FromValue f) =>
+    FromValue (a, b, c, d, e, f) where
+    fromVal (Tuple [a,b,c,d,e,f]) = (,,,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d <*> fromVal e <*> fromVal f
+    fromVal (List [a,b,c,d,e,f])  = (,,,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d <*> fromVal e <*> fromVal f
+    fromVal _             = Nothing
+
+instance (FromValue a, FromValue b, FromValue c, FromValue d, FromValue e, FromValue f, FromValue g) =>
+    FromValue (a, b, c, d, e, f, g) where
+    fromVal (Tuple [a,b,c,d,e,f,g]) = (,,,,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d <*> fromVal e <*> fromVal f <*> fromVal g
+    fromVal (List [a,b,c,d,e,f,g])  = (,,,,,,) <$> fromVal a <*> fromVal b <*> fromVal c <*> fromVal d <*> fromVal e <*> fromVal f <*> fromVal g
     fromVal _             = Nothing
