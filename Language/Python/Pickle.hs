@@ -17,8 +17,8 @@ import Data.Int (Int32, Int64)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List (foldl')
-import Data.Map (Map)
-import qualified Data.Map as M
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as M
 import Data.Serialize.Get (getWord16le, getInt32le, getInt64le, runGet)
 import Data.Serialize.IEEE754 (getFloat64be)
 import Data.Serialize.Put (runPut, putByteString, putWord8, putWord16le, putWord32le, putWord64be, Put)
@@ -746,3 +746,79 @@ dictGetString (Dict d) s = case M.lookup (BinString s) d of
   Just (BinString s') -> return s'
   _ -> Left "dictGetString: not a dict, or no such key."
 dictGetString v _ = error ("Can only run dictGetString on a Dict, you run it on " ++ show v ++ ".")
+
+----------------------------------------------------------------------
+-- Convert Values to Haskell Representation
+----------------------------------------------------------------------
+
+class FromValue a where
+    fromVal :: Value -> Maybe a
+
+{-
+data Value =
+    Dict (Map Value Value)
+  | List [Value]
+  | Tuple [Value]
+  | Set (SET.Set Value)
+  | None
+  | Bool Bool
+  | BinInt Integer
+  | BinLong Integer
+  | BinFloat Double
+  | BinString S.ByteString
+  | MarkObject -- Urk, not really a value.
+  deriving (Eq, Ord, Show)
+-}
+
+instance FromValue Int where
+    fromVal (BinInt i) = Just (fromInteger i)
+    fromVal (BinLong i) = Just (fromInteger i)
+    fromVal _          = Nothing
+
+instance FromValue Integer where
+    fromVal (BinInt i) = Just i
+    fromVal (BinLong i) = Just i
+    fromVal _          = Nothing
+
+instance FromValue S.ByteString where
+    fromVal (BinString s) = Just s
+    fromVal _             = Nothing
+
+instance FromValue Double where
+    fromVal (BinFloat d) = Just d
+    fromVal _            = Nothing
+
+instance FromValue T.Text where
+    fromVal (BinString bs) = Just (T.decodeUtf8 bs)
+    fromVal _              = Nothing
+
+instance FromValue Bool where
+    fromVal (Bool b) = Just b
+    fromVal _        = Nothing
+
+instance (FromValue a) => FromValue [a] where
+    fromVal (List as)  = mapM fromVal as
+    fromVal (Tuple as) = mapM fromVal as
+    fromVal (Set as)   = mapM fromVal (SET.toList as)
+    fromVal _          = Nothing
+
+instance (FromValue a, Ord a) => FromValue (SET.Set a) where
+    fromVal (Set as) = SET.fromList <$> fromVal (Set as)
+    fromVal _        = Nothing
+
+instance (FromValue k, FromValue v, Ord k) => FromValue (Map k v) where
+    fromVal (Dict m) =
+        M.foldrWithKey
+            (\k v maybeM -> M.insert <$> fromVal k <*> fromVal v <*> maybeM)
+            (Just M.empty) m
+    fromVal _        = Nothing
+
+instance (FromValue a, FromValue b) => FromValue (a, b) where
+    fromVal (Tuple [a,b]) = (,) <$> fromVal a <*> fromVal b
+    fromVal (List [a,b])  = (,) <$> fromVal a <*> fromVal b
+    fromVal _             = Nothing
+
+instance (FromValue a, FromValue b, FromValue c) => FromValue (a, b, c) where
+    fromVal (Tuple [a,b,c]) = (,,) <$> fromVal a <*> fromVal b <*> fromVal c
+    fromVal (List [a,b,c])  = (,,) <$> fromVal a <*> fromVal b <*> fromVal c
+    fromVal _             = Nothing
