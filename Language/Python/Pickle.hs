@@ -24,6 +24,7 @@ import Data.Serialize.IEEE754 (getFloat64be)
 import Data.Serialize.Put (runPut, putByteString, putWord8, putWord16le, putWord32le, putWord64be, Put)
 import qualified Data.Set as SET
 import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
 import qualified Data.Text.Encoding as T
 import Data.Word (Word64)
 import Foreign.Marshal.Utils (with)
@@ -385,6 +386,10 @@ data OpCode =
   | BINBYTES8 S.ByteString
   | BYTEARRAY8 S.ByteString
 
+  -- Out-of-band buffer
+  | NEXT_BUFFER
+  | READONLY_BUFFER
+
   -- None
   | NONE
 
@@ -418,12 +423,14 @@ data OpCode =
   -- Dictionaries
   | EMPTY_DICT
   | DICT
-
-  -- Sets
   | SETITEM
   | SETITEMS
+
+  -- Sets
   | EMPTY_SET
   | ADDITEMS
+
+  -- Frozen sets
   | FROZENSET
 
   -- Stack manipulation
@@ -431,7 +438,6 @@ data OpCode =
   | DUP
   | MARK
   | POP_MARK
-  | STACK_GLOBAL
 
   -- Memo manipulation
   | GET Int
@@ -449,21 +455,21 @@ data OpCode =
 
   -- Various
   | GLOBAL S.ByteString S.ByteString
+  | STACK_GLOBAL
+
   | REDUCE
   | BUILD
   | INST S.ByteString S.ByteString
   | OBJ
   | NEWOBJ
   | NEWOBJ_EX
-  | FRAME Int64
-  | NEXT_BUFFER
-  | READONLY_BUFFER
 
   -- Pickle machine control
   | PROTO Int -- in [2..255]
   | STOP
 
   -- Persistent IDs
+  | FRAME Int64
   | PERSID S.ByteString
   | BINPERSID
   deriving Show
@@ -493,12 +499,15 @@ data Value =
   | List [Value]
   | Tuple [Value]
   | Set (SET.Set Value)
+  | FrozenSet (SET.Set Value)
   | None
   | Bool Bool
   | BinInt Integer
   | BinLong Integer
   | BinFloat Double
   | BinString S.ByteString
+  | ClassObject S.ByteString S.ByteString
+  | ObjectInstance
   | MarkObject -- Urk, not really a value.
   deriving (Eq, Ord, Show)
 
@@ -527,95 +536,154 @@ executePartial (op:ops) stack memo = case executeOne op stack memo of
   Right (stack', memo') -> executePartial ops stack' memo'
 
 executeOne :: OpCode -> Stack -> Memo -> Either String (Stack, Memo)
-executeOne EMPTY_DICT stack memo = return (Dict M.empty: stack, memo)
-executeOne EMPTY_LIST stack memo = return (List []: stack, memo)
-executeOne EMPTY_TUPLE stack memo = return (Tuple []: stack, memo)
-executeOne (PUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
-executeOne (GET i) stack memo = executeLookup i stack memo
-executeOne (BINPUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
-executeOne (BINGET i) stack memo = executeLookup i stack memo
-executeOne NONE stack memo = return (None:stack, memo)
-executeOne NEWTRUE stack memo = return (Bool True:stack, memo)
-executeOne NEWFALSE stack memo = return (Bool False:stack, memo)
 executeOne (INT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT1 i) stack memo = return (BinInt i:stack, memo)
 executeOne (BININT2 i) stack memo = return (BinInt i:stack, memo)
 executeOne (LONG i) stack memo = return (BinLong i:stack, memo)
 executeOne (LONG1 i) stack memo = return (BinLong i:stack, memo)
+executeOne (LONG4 i) stack memo = return (BinLong i:stack, memo)
+
+executeOne (STRING s) stack memo = return (BinString s:stack, memo)
+executeOne (BINSTRING s) stack memo = return (BinString s:stack, memo)
+executeOne (SHORT_BINSTRING s) stack memo = return (BinString s:stack, memo)
+executeOne (BINBYTES s) stack memo = return (BinString s:stack, memo)
+executeOne (SHORT_BINBYTES s) stack memo = return (BinString s:stack, memo)
+executeOne (BINBYTES8 s) stack memo = return (BinString s:stack, memo)
+executeOne (BYTEARRAY8 s) stack memo = return (BinString s:stack, memo)
+
+executeOne NONE stack memo = return (None:stack, memo)
+
+executeOne NEWTRUE stack memo = return (Bool True:stack, memo)
+executeOne NEWFALSE stack memo = return (Bool False:stack, memo)
+
+executeOne (UNICODE b) stack memo = return (BinString (encodeUtf8 b):stack, memo)
+executeOne (SHORT_BINUNICODE b) stack memo = return (BinString b:stack, memo)
+executeOne (BINUNICODE b) stack memo = return (BinString b:stack, memo)
+executeOne (BINUNICODE8 b) stack memo = return (BinString b:stack, memo)
+
 executeOne (FLOAT d) stack memo = return (BinFloat d:stack, memo)
 executeOne (BINFLOAT d) stack memo = return (BinFloat d:stack, memo)
-executeOne (STRING s) stack memo = return (BinString s:stack, memo)
-executeOne (SHORT_BINSTRING s) stack memo = return (BinString s:stack, memo)
-executeOne MARK stack memo = return (MarkObject:stack, memo)
+
+executeOne EMPTY_LIST stack memo = return (List []: stack, memo)
+executeOne APPEND stack memo = executeAppend stack memo
+executeOne APPENDS stack memo = executeAppends [] stack memo
+executeOne LIST stack memo = executeList [] stack memo
+
+executeOne EMPTY_TUPLE stack memo = return (Tuple []: stack, memo)
 executeOne TUPLE stack memo = executeTuple [] stack memo
 executeOne TUPLE1 (a:stack) memo = return (Tuple [a]:stack, memo)
 executeOne TUPLE2 (b:a:stack) memo = return (Tuple [a, b]:stack, memo)
 executeOne TUPLE3 (c:b:a:stack) memo = return (Tuple [a, b, c]:stack, memo)
+
+executeOne EMPTY_DICT stack memo = return (Dict M.empty: stack, memo)
 executeOne DICT stack memo = executeDict [] stack memo
 executeOne SETITEM stack memo = executeSetitem stack memo
 executeOne SETITEMS stack memo = executeSetitems [] stack memo
-executeOne LIST stack memo = executeList [] stack memo
-executeOne APPEND stack memo = executeAppend stack memo
-executeOne APPENDS stack memo = executeAppends [] stack memo
-executeOne (PROTO _) stack memo = return (stack, memo)
-executeOne STOP stack memo = Right (stack, memo)
-executeOne (BINBYTES b) stack memo = return (BinString b:stack, memo)
-executeOne (SHORT_BINBYTES b) stack memo = return (BinString b:stack, memo)
-executeOne (SHORT_BINUNICODE b) stack memo = return (BinString b:stack, memo)
-executeOne (BINUNICODE8 b) stack memo = return (BinString b:stack, memo)
-executeOne (BINBYTES8 b) stack memo = return (BinString b:stack, memo)
+
 executeOne EMPTY_SET stack memo = return (Set SET.empty:stack, memo)
 executeOne ADDITEMS stack memo = return (Set newS:rest, memo)
   where (items,Set s:rest) = span (\case
                   (Set _) -> False
                   _       -> True) stack
         newS = foldr SET.insert s items 
-executeOne FROZENSET _ _ = error "FROZENSET unimplemented"
-executeOne NEWOBJ_EX _ _ = error "NEWOBJ_EX unimplemented"
-executeOne STACK_GLOBAL _ _ = error "STACK_GLOBAL unimplemented"
-executeOne MEMOIZE (s:stack) memo = return (s:stack, IM.insert (IM.size memo) s memo)
-executeOne (FRAME _) stack memo = return (stack, memo)
 
-executeOne op _ _ = Left $ "Can't execute opcode " ++ show op ++ "."
+executeOne FROZENSET stack memo = executeFrozenSet SET.empty stack memo
+
+executeOne POP (_:stack) memo = return (stack, memo)
+executeOne DUP (x:stack) memo = return (x:x:stack, memo)
+executeOne MARK stack memo = return (MarkObject:stack, memo)
+executeOne POP_MARK (MarkObject:stack) memo = return (stack, memo)
+executeOne POP_MARK (_:stack) memo = executeOne POP_MARK stack memo
+
+executeOne (GET i) stack memo = executeLookup i stack memo
+executeOne (BINGET i) stack memo = executeLookup i stack memo
+executeOne (LONG_BINGET i) stack memo = executeLookup (fromInteger i) stack memo
+executeOne (PUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
+executeOne (BINPUT i) (s:stack) memo = return (s:stack, IM.insert i s memo)
+executeOne (LONG_BINPUT i) (s:stack) memo = return (s:stack, IM.insert (fromInteger i) s memo)
+executeOne MEMOIZE (s:stack) memo = return (s:stack, IM.insert (IM.size memo) s memo)
+
+-- EXT codes are not implemented
+
+executeOne (GLOBAL m c) stack memo = return ((ClassObject m c):stack, memo)
+executeOne STACK_GLOBAL ((BinString c):(BinString m):stack) memo = return ((ClassObject m c):stack, memo)
+
+executeOne REDUCE ((Tuple t):(ClassObject moduleName className):stack) memo =
+    case moduleName of
+      "builtins" ->
+          case className of
+            "str" ->
+                case t of
+                  [BinString s] -> return ((BinString s):stack, memo)
+                  _ -> eOneErr ("Invalid input to str(): " ++ show t) stack memo
+            _ -> eOneErr ("Builtin " ++ show className ++ " not supported.") stack memo
+      _ -> eOneErr ("Class " ++ show moduleName ++ "." ++ show className ++ " not supported.") stack memo
+-- This returns the original object without running __setstate__. Is it better to do this than fail?
+executeOne BUILD (_:stack) memo = return (stack, memo)
+executeOne (INST _ _) (MarkObject:stack) memo = return (ObjectInstance:stack, memo)
+executeOne (INST m c) (_:stack) memo = executeOne (INST m c) stack memo
+executeOne OBJ (MarkObject:stack) memo = return (ObjectInstance:stack, memo)
+executeOne OBJ (_:stack) memo = executeOne OBJ stack memo
+executeOne NEWOBJ (_:_:stack) memo = return (ObjectInstance:stack, memo)
+executeOne NEWOBJ_EX (_:_:_:stack) memo = return (ObjectInstance:stack, memo)
+
+executeOne (PROTO _) stack memo = return (stack, memo)
+executeOne STOP stack memo = return (stack, memo)
+
+executeOne (FRAME _) stack memo = return (stack, memo)
+executeOne (PERSID _) stack memo = return (ObjectInstance:stack, memo)
+executeOne BINPERSID (_:stack) memo = return (ObjectInstance:stack, memo)
+
+
+executeOne op stack memo = eOneErr ("Can't execute opcode " ++ show op) stack memo
+
+eOneErr :: String -> Stack -> Memo -> Either String (Stack, Memo)
+eOneErr e stack memo = Left (e ++ ". stack: " ++ show stack ++ ", memo: " ++ show memo ++ ".")
 
 executeLookup :: Int -> Stack -> Memo -> Either String (Stack, Memo)
 executeLookup k stack memo = case IM.lookup k memo of
   Nothing -> Left "Unknown memo key"
   Just s -> Right (s:stack, memo)
 
-executeTuple :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
+executeTuple :: [Value] -> Stack -> Memo -> Either String ([Value], Memo)
 executeTuple l (MarkObject:stack) memo = return (Tuple l:stack, memo)
 executeTuple l (a:stack) memo = executeTuple (a : l) stack memo
-executeTuple _ _ _ = error "Empty stack in executeTuple"
+executeTuple _ _ _ = Left "Empty stack in executeTuple"
 
-executeDict :: Monad m => [(Value, Value)] -> Stack -> Memo -> m ([Value], Memo)
+executeDict :: [(Value, Value)] -> Stack -> Memo -> Either String ([Value], Memo)
 executeDict l (MarkObject:stack) memo = return (l `addToDict` Dict M.empty:stack, memo)
 executeDict l (a:b:stack) memo = executeDict ((b, a) : l) stack memo
-executeDict _ _ _ = error "Empty stack in executeDict"
+executeDict _ _ _ = Left "Empty stack in executeDict"
 
-executeList :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
+executeList :: [Value] -> Stack -> Memo -> Either String ([Value], Memo)
 executeList l (MarkObject:stack) memo = return (List l:stack, memo)
 executeList l (x:stack) memo = executeList (x : l) stack memo
-executeList _ _ _ = error "Empty stack in executeList"
+executeList _ _ _ = Left "Empty stack in executeList"
 
-executeSetitem :: Monad m => Stack -> Memo -> m ([Value], Memo)
+executeSetitem :: Stack -> Memo -> Either String ([Value], Memo)
 executeSetitem (v:k:Dict d:stack) memo = return (Dict (M.insert k v d):stack, memo)
-executeSetitem _ _ = error "Empty stack in executeSetitem"
+executeSetitem _ _ = Left "Empty stack in executeSetitem"
 
-executeSetitems :: Monad m => [(Value, Value)] -> Stack -> Memo -> m ([Value], Memo)
+executeSetitems :: [(Value, Value)] -> Stack -> Memo -> Either String ([Value], Memo)
 executeSetitems l (MarkObject:Dict d:stack) memo = return (l `addToDict` Dict d:stack, memo)
 executeSetitems l (a:b:stack) memo = executeSetitems ((b, a) : l) stack memo
-executeSetitems _ _ _ = error "Empty stack in executeSetitems"
+executeSetitems _ _ _ = Left "Empty stack in executeSetitems"
 
-executeAppend :: Monad m => Stack -> Memo -> m ([Value], Memo)
+executeAppend :: Stack -> Memo -> Either String ([Value], Memo)
 executeAppend (x:List xs:stack) memo = return (List (xs ++ [x]):stack, memo)
-executeAppend _ _ = error "Empty stack in executeAppend"
+executeAppend _ _ = Left "Empty stack in executeAppend"
 
-executeAppends :: Monad m => [Value] -> Stack -> Memo -> m ([Value], Memo)
+executeAppends :: [Value] -> Stack -> Memo -> Either String ([Value], Memo)
 executeAppends l (MarkObject:List xs:stack) memo = return (List (xs ++ l):stack, memo)
 executeAppends l (x:stack) memo = executeAppends (x : l) stack memo
-executeAppends _ _ _ = error "Empty stack in executeAppends"
+executeAppends _ _ _ = Left "Empty stack in executeAppends"
+
+executeFrozenSet :: SET.Set Value -> Stack -> Memo -> Either String ([Value], Memo)
+executeFrozenSet s (MarkObject:stack) memo = return (FrozenSet s:stack, memo)
+executeFrozenSet s (x:stack) memo = executeFrozenSet (SET.insert x s) stack memo
+executeFrozenSet _ _ _ = Left "Empty frozen set in executeFrozenSet"
+
 
 addToDict :: [(Value, Value)] -> Value -> Value
 addToDict l (Dict d) = Dict $ foldl' add d l
