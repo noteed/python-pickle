@@ -1,5 +1,5 @@
 name:                python-pickle
-version:             0.2.3
+version:             0.3.0
 Cabal-Version:       >= 1.8
 synopsis:            Serialization/deserialization using Python Pickle format.
 description:
@@ -8,8 +8,8 @@ description:
 category:            Development
 license:             BSD3
 license-file:        LICENSE
-author:              Vo Minh Thu
-maintainer:          thu@hypered.be
+author:              Vo Minh Thu, Timothy Copeland
+maintainer:          timothy@timothycopeland.net
 build-type:          Simple
 
 source-repository head
@@ -23,7 +23,7 @@ library
                        cereal == 0.5.*,
                        containers == 0.6.*,
                        mtl == 2.2.*,
-		       text == 1.2.*
+                       text == 1.2.*
   exposed-modules:     Language.Python.Pickle
   ghc-options:         -Wall
 

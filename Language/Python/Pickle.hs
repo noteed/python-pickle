@@ -312,6 +312,10 @@ serialize opcode = case opcode of
     putByteString "U"
     putWord8 . fromIntegral $ S.length s
     putByteString s
+  BINUNICODE s -> do
+    putByteString "X"
+    putWord32le . fromIntegral $ S.length s
+    putByteString s
   EMPTY_DICT -> putByteString "}"
   EMPTY_LIST -> putByteString "]"
   EMPTY_TUPLE -> putByteString ")"
@@ -495,7 +499,7 @@ protocol5 = [BYTEARRAY8, NEXT_BUFFER, READONLY_BUFFER]
 
 -- Maybe I can call them Py? And Have IsString/Num instances?
 data Value =
-    Dict (Map Value Value)
+    Dict [(Value,Value)]
   | List [Value]
   | Tuple [Value]
   | Set (SET.Set Value)
@@ -506,6 +510,7 @@ data Value =
   | BinLong Integer
   | BinFloat Double
   | BinString S.ByteString
+  | BinUnicode S.ByteString
   | ClassObject S.ByteString S.ByteString
   | ObjectInstance
   | MarkObject -- Urk, not really a value.
@@ -557,10 +562,10 @@ executeOne NONE stack memo = return (None:stack, memo)
 executeOne NEWTRUE stack memo = return (Bool True:stack, memo)
 executeOne NEWFALSE stack memo = return (Bool False:stack, memo)
 
-executeOne (UNICODE b) stack memo = return (BinString (encodeUtf8 b):stack, memo)
-executeOne (SHORT_BINUNICODE b) stack memo = return (BinString b:stack, memo)
-executeOne (BINUNICODE b) stack memo = return (BinString b:stack, memo)
-executeOne (BINUNICODE8 b) stack memo = return (BinString b:stack, memo)
+executeOne (UNICODE b) stack memo = return (BinUnicode (encodeUtf8 b):stack, memo)
+executeOne (SHORT_BINUNICODE b) stack memo = return (BinUnicode b:stack, memo)
+executeOne (BINUNICODE b) stack memo = return (BinUnicode b:stack, memo)
+executeOne (BINUNICODE8 b) stack memo = return (BinUnicode b:stack, memo)
 
 executeOne (FLOAT d) stack memo = return (BinFloat d:stack, memo)
 executeOne (BINFLOAT d) stack memo = return (BinFloat d:stack, memo)
@@ -576,7 +581,7 @@ executeOne TUPLE1 (a:stack) memo = return (Tuple [a]:stack, memo)
 executeOne TUPLE2 (b:a:stack) memo = return (Tuple [a, b]:stack, memo)
 executeOne TUPLE3 (c:b:a:stack) memo = return (Tuple [a, b, c]:stack, memo)
 
-executeOne EMPTY_DICT stack memo = return (Dict M.empty: stack, memo)
+executeOne EMPTY_DICT stack memo = return (Dict []: stack, memo)
 executeOne DICT stack memo = executeDict [] stack memo
 executeOne SETITEM stack memo = executeSetitem stack memo
 executeOne SETITEMS stack memo = executeSetitems [] stack memo
@@ -652,7 +657,7 @@ executeTuple l (a:stack) memo = executeTuple (a : l) stack memo
 executeTuple _ _ _ = Left "Empty stack in executeTuple"
 
 executeDict :: [(Value, Value)] -> Stack -> Memo -> Either String ([Value], Memo)
-executeDict l (MarkObject:stack) memo = return (l `addToDict` Dict M.empty:stack, memo)
+executeDict l (MarkObject:stack) memo = return (l `addToDict` Dict []:stack, memo)
 executeDict l (a:b:stack) memo = executeDict ((b, a) : l) stack memo
 executeDict _ _ _ = Left "Empty stack in executeDict"
 
@@ -662,11 +667,11 @@ executeList l (x:stack) memo = executeList (x : l) stack memo
 executeList _ _ _ = Left "Empty stack in executeList"
 
 executeSetitem :: Stack -> Memo -> Either String ([Value], Memo)
-executeSetitem (v:k:Dict d:stack) memo = return (Dict (M.insert k v d):stack, memo)
+executeSetitem (v:k:Dict d:stack) memo = return (Dict (d ++ [(k,v)]):stack, memo)
 executeSetitem _ _ = Left "Empty stack in executeSetitem"
 
 executeSetitems :: [(Value, Value)] -> Stack -> Memo -> Either String ([Value], Memo)
-executeSetitems l (MarkObject:Dict d:stack) memo = return (l `addToDict` Dict d:stack, memo)
+executeSetitems l (MarkObject:Dict d:stack) memo = return (reverse l `addToDict` Dict d:stack, memo)
 executeSetitems l (a:b:stack) memo = executeSetitems ((b, a) : l) stack memo
 executeSetitems _ _ _ = Left "Empty stack in executeSetitems"
 
@@ -687,7 +692,7 @@ executeFrozenSet _ _ _ = Left "Empty frozen set in executeFrozenSet"
 
 addToDict :: [(Value, Value)] -> Value -> Value
 addToDict l (Dict d) = Dict $ foldl' add d l
-  where add d' (k, v) = M.insert k v d'
+  where add d' (k, v) = (k,v):d'
 addToDict _ _ = error "Second argument to addToDict must be a dict"
 
 ----------------------------------------------------------------------
@@ -716,6 +721,7 @@ pickle' value = do
       BinLong i -> pickleBinLong i
       BinFloat d -> pickleBinFloat d
       BinString s -> pickleBinString s
+      BinUnicode s -> pickleBinUnicode s
       x -> error $ "TODO: pickle " ++ show x
 
 -- TODO actually lookup values in the map, reusing their key.
@@ -726,18 +732,17 @@ binput' value = do
   put (M.insert value i m)
   tell [BINPUT i]
 
-pickleDict :: Map Value Value -> Pickler ()
+pickleDict :: [(Value,Value)] -> Pickler ()
 pickleDict d = do
   tell [EMPTY_DICT]
   binput' (Dict d)
 
-  let kvs = M.toList d
-  case kvs of
+  case d of
     [] -> return ()
     [(k,v)] -> pickle' k >> pickle' v >> tell [SETITEM]
     _ -> do
       tell [MARK]
-      mapM_ (\(k, v) -> pickle' k >> pickle' v) kvs
+      mapM_ (\(k, v) -> pickle' k >> pickle' v) d
       tell [SETITEMS]
 
 pickleList :: [Value] -> Pickler ()
@@ -795,22 +800,27 @@ pickleBinString s = do
   tell [SHORT_BINSTRING s]
   binput' (BinString s)
 
+pickleBinUnicode :: S.ByteString -> Pickler ()
+pickleBinUnicode s = do
+  tell [BINUNICODE s]
+  binput' (BinUnicode s)
+
 ----------------------------------------------------------------------
 -- Manipulate Values
 ----------------------------------------------------------------------
 
 dictGet :: Value -> Value -> Either String (Maybe Value)
-dictGet (Dict d) v = return $ M.lookup v d
+dictGet (Dict d) v = return $ M.lookup v (M.fromList d)
 dictGet _ _ = Left "dictGet: not a dict."
 
 dictGet' :: Value -> Value -> Either String Value
-dictGet' (Dict d) v = case M.lookup v d of
+dictGet' (Dict d) v = case M.lookup v (M.fromList d) of
   Just value -> return value
   Nothing -> Left "dictGet': no such key."
 dictGet' _ _ = Left "dictGet': not a dict."
 
 dictGetString :: Value -> S.ByteString -> Either String S.ByteString
-dictGetString (Dict d) s = case M.lookup (BinString s) d of
+dictGetString (Dict d) s = case M.lookup (BinString s) (M.fromList d) of
   Just (BinString s') -> return s'
   _ -> Left "dictGetString: not a dict, or no such key."
 dictGetString v _ = error ("Can only run dictGetString on a Dict, you run it on " ++ show v ++ ".")
@@ -834,6 +844,7 @@ data Value =
   | BinLong Integer
   | BinFloat Double
   | BinString S.ByteString
+  | BinUnicode S.ByteString
   | MarkObject -- Urk, not really a value.
   deriving (Eq, Ord, Show)
 -}
@@ -850,6 +861,7 @@ instance FromValue Integer where
 
 instance FromValue S.ByteString where
     fromVal (BinString s) = Just s
+    fromVal (BinUnicode s) = Just s
     fromVal _             = Nothing
 
 instance FromValue Double where
@@ -858,6 +870,7 @@ instance FromValue Double where
 
 instance FromValue T.Text where
     fromVal (BinString bs) = Just (T.decodeUtf8 bs)
+    fromVal (BinUnicode bs) = Just (T.decodeUtf8 bs)
     fromVal _              = Nothing
 
 instance FromValue Bool where
@@ -878,7 +891,7 @@ instance (FromValue k, FromValue v, Ord k) => FromValue (Map k v) where
     fromVal (Dict m) =
         M.foldrWithKey
             (\k v maybeM -> M.insert <$> fromVal k <*> fromVal v <*> maybeM)
-            (Just M.empty) m
+            (Just M.empty) (M.fromList m)
     fromVal _        = Nothing
 
 instance (FromValue a, FromValue b) =>

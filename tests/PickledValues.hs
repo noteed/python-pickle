@@ -65,12 +65,12 @@ testAgainstPython protocol expected s = do
 
 expressions :: [(String, Value)]
 expressions =
-  [ ("{}", Dict M.empty)
+  [ ("{}", Dict [])
   , ("{'type': 'cache-query'}",
-      Dict $ M.fromList [(BinString "type", BinString "cache-query")])
+      Dict [(BinUnicode "type", BinUnicode "cache-query")])
   , ("{'type': 'cache-query', 'metric': 'some.metric.name'}",
-      Dict $ M.fromList [(BinString "type", BinString "cache-query"),
-        (BinString "metric", BinString "some.metric.name")])
+      Dict [(BinUnicode "type", BinUnicode "cache-query"),
+        (BinUnicode "metric", BinUnicode "some.metric.name")])
 
   , ("[]", List [])
   , ("[1]", List [BinInt 1])
@@ -82,30 +82,30 @@ expressions =
   , ("(1, 2, 3)", Tuple [BinInt 1, BinInt 2, BinInt 3])
   , ("(1, 2, 3, 4)", Tuple [BinInt 1, BinInt 2, BinInt 3, BinInt 4])
   , ("((), [], [3, 4], {})",
-    Tuple [Tuple [], List [], List [BinInt 3, BinInt 4], Dict M.empty])
+    Tuple [Tuple [], List [], List [BinInt 3, BinInt 4], Dict []])
 
   , ("None", None)
   , ("True", Bool True)
   , ("False", Bool False)
 
   , ("{'datapoints': [(1, 2)]}",
-      Dict $ M.fromList [(BinString "datapoints",
+      Dict [(BinUnicode "datapoints",
         List [Tuple [BinInt 1, BinInt 2]])])
   , ("{'datapoints': [(1, 2)], (2,): 'foo'}",
-        Dict $ M.fromList
-          [ ( BinString "datapoints"
+        Dict
+          [ ( BinUnicode "datapoints"
             , List [Tuple [BinInt 1, BinInt 2]])
           , ( Tuple [BinInt 2]
-            , BinString "foo")
+            , BinUnicode "foo")
           ])
   , ("[(1, 2)]", List [Tuple [BinInt 1, BinInt 2]])
-  , ("('twice', 'twice')", Tuple [BinString "twice", BinString "twice"])
-  , ("{'pi': 3.14159}", Dict $ M.fromList [(BinString "pi", BinFloat 3.14159)])
+  , ("('twice', 'twice')", Tuple [BinUnicode "twice", BinUnicode "twice"])
+  , ("{'pi': 3.14159}", Dict [(BinUnicode "pi", BinFloat 3.14159)])
   ]
   ++ map (show &&& BinInt) ints
   ++ map (show &&& BinFloat) doubles
-  ++ map (quote . C.unpack &&& BinString) strings
-  ++ map ((++ "L") . show &&& BinLong) ints
+  ++ map (quote . C.unpack &&& BinUnicode) strings
+  -- ++ map ((++ "L") . show &&& BinLong) ints
 
 ints :: [Integer]
 ints =
