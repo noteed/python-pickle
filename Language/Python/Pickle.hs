@@ -587,11 +587,14 @@ executeOne SETITEM stack memo = executeSetitem stack memo
 executeOne SETITEMS stack memo = executeSetitems [] stack memo
 
 executeOne EMPTY_SET stack memo = return (Set SET.empty:stack, memo)
-executeOne ADDITEMS stack memo = return (Set newS:rest, memo)
-  where (items,Set s:rest) = span (\case
+executeOne ADDITEMS stack memo = return (newStack', memo)
+  where (items,newStack) = span (\case
                   (Set _) -> False
                   _       -> True) stack
-        newS = foldr SET.insert s items 
+        insertAll s = foldr SET.insert s items
+        newStack' = (\case
+          (Set s:rest) -> Set (insertAll s) : rest
+          nonSet       -> nonSet) newStack
 
 executeOne FROZENSET stack memo = executeFrozenSet SET.empty stack memo
 

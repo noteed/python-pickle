@@ -10,8 +10,6 @@ import Control.Arrow ((&&&))
 import Control.Monad (when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
-import Data.String (IsString)
-import qualified Data.Map as M
 import System.Directory (removeFile)
 import System.Process (rawSystem)
 import Test.HUnit (assertEqual, assertFailure)
@@ -122,5 +120,5 @@ strings :: [C.ByteString]
 strings =
   ["cache-query"]
 
-quote :: IsString [a] => [a] -> [a]
+quote :: String -> String
 quote s = concat ["'", s, "'"]
