@@ -1,16 +1,20 @@
+cabal-version:       3.0
 name:                python-pickle
 version:             0.3.0
-Cabal-Version:       >= 1.8
+
 synopsis:            Serialization/deserialization using Python Pickle format.
 description:
   This package implements serialization and deserialization of Python objects
   using the Pickle format.
 category:            Development
-license:             BSD3
+license:             BSD-3-Clause
 license-file:        LICENSE
 author:              Vo Minh Thu, Timothy Copeland
 maintainer:          timothy@timothycopeland.net
 build-type:          Simple
+homepage:            https://github.com/noteed/python-pickle
+bug-reports:         https://github.com/noteed/python-pickle/issues
+
 
 source-repository head
   type: git
@@ -26,6 +30,7 @@ library
                        text >= 1.2.5 && < 1.3
   exposed-modules:     Language.Python.Pickle
   ghc-options:         -Wall
+  default-language:    Haskell2010
 
 executable pickle
   main-is:             pickle.hs
@@ -35,6 +40,7 @@ executable pickle
                        cmdargs >= 0.10.22 && < 0.11,
                        python-pickle
   ghc-options:         -Wall
+  default-language:    Haskell2010
 
 test-suite pickled-values
   hs-source-dirs: tests
@@ -53,3 +59,4 @@ test-suite pickled-values
     test-framework-hunit
 
   ghc-options: -Wall
+  default-language:    Haskell2010
