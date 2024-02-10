@@ -613,6 +613,7 @@ executeOne MEMOIZE (s:stack) memo = return (s:stack, IM.insert (IM.size memo) s 
 
 executeOne (GLOBAL m c) stack memo = return ((ClassObject m c):stack, memo)
 executeOne STACK_GLOBAL ((BinString c):(BinString m):stack) memo = return ((ClassObject m c):stack, memo)
+executeOne STACK_GLOBAL ((BinUnicode c):(BinUnicode m):stack) memo = return ((ClassObject m c):stack, memo)
 
 executeOne REDUCE ((Tuple t):(ClassObject moduleName className):stack) memo =
     case moduleName of
@@ -621,6 +622,7 @@ executeOne REDUCE ((Tuple t):(ClassObject moduleName className):stack) memo =
             "str" ->
                 case t of
                   [BinString s] -> return ((BinString s):stack, memo)
+                  [BinUnicode s] -> return ((BinUnicode s):stack, memo)
                   _ -> eOneErr ("Invalid input to str(): " ++ show t) stack memo
             _ -> eOneErr ("Builtin " ++ show className ++ " not supported.") stack memo
       _ -> eOneErr ("Class " ++ show moduleName ++ "." ++ show className ++ " not supported.") stack memo
