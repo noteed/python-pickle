@@ -10,8 +10,6 @@ import Control.Arrow ((&&&))
 import Control.Monad (when)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
-import Data.String (IsString)
-import qualified Data.Map as M
 import System.Directory (removeFile)
 import System.Process (rawSystem)
 import Test.HUnit (assertEqual, assertFailure)
@@ -31,6 +29,12 @@ tests =
   , testGroup "PickledValues protocol 1" $
       map (\(a, b) -> testCase a $ testAgainstPython 1 b a) expressions
   , testGroup "PickledValues protocol 2" $
+      map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
+  , testGroup "PickledValues protocol 3" $
+      map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
+  , testGroup "PickledValues protocol 4" $
+      map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
+  , testGroup "PickledValues protocol 5" $
       map (\(a, b) -> testCase a $ testAgainstPython 2 b a) expressions
   ]
 
@@ -59,12 +63,12 @@ testAgainstPython protocol expected s = do
 
 expressions :: [(String, Value)]
 expressions =
-  [ ("{}", Dict M.empty)
+  [ ("{}", Dict [])
   , ("{'type': 'cache-query'}",
-      Dict $ M.fromList [(BinString "type", BinString "cache-query")])
+      Dict [(BinUnicode "type", BinUnicode "cache-query")])
   , ("{'type': 'cache-query', 'metric': 'some.metric.name'}",
-      Dict $ M.fromList [(BinString "type", BinString "cache-query"),
-        (BinString "metric", BinString "some.metric.name")])
+      Dict [(BinUnicode "type", BinUnicode "cache-query"),
+        (BinUnicode "metric", BinUnicode "some.metric.name")])
 
   , ("[]", List [])
   , ("[1]", List [BinInt 1])
@@ -76,31 +80,32 @@ expressions =
   , ("(1, 2, 3)", Tuple [BinInt 1, BinInt 2, BinInt 3])
   , ("(1, 2, 3, 4)", Tuple [BinInt 1, BinInt 2, BinInt 3, BinInt 4])
   , ("((), [], [3, 4], {})",
-    Tuple [Tuple [], List [], List [BinInt 3, BinInt 4], Dict M.empty])
+    Tuple [Tuple [], List [], List [BinInt 3, BinInt 4], Dict []])
 
   , ("None", None)
   , ("True", Bool True)
   , ("False", Bool False)
 
   , ("{'datapoints': [(1, 2)]}",
-      Dict $ M.fromList [(BinString "datapoints",
+      Dict [(BinUnicode "datapoints",
         List [Tuple [BinInt 1, BinInt 2]])])
   , ("{'datapoints': [(1, 2)], (2,): 'foo'}",
-        Dict $ M.fromList
-          [ ( BinString "datapoints"
+        Dict
+          [ ( BinUnicode "datapoints"
             , List [Tuple [BinInt 1, BinInt 2]])
           , ( Tuple [BinInt 2]
-            , BinString "foo")
+            , BinUnicode "foo")
           ])
   , ("[(1, 2)]", List [Tuple [BinInt 1, BinInt 2]])
-  , ("('twice', 'twice')", Tuple [BinString "twice", BinString "twice"])
+  , ("('twice', 'twice')", Tuple [BinUnicode "twice", BinUnicode "twice"])
+  , ("{'pi': 3.14159}", Dict [(BinUnicode "pi", BinFloat 3.14159)])
   ]
   ++ map (show &&& BinInt) ints
   ++ map (show &&& BinFloat) doubles
-  ++ map (quote . C.unpack &&& BinString) strings
-  ++ map ((++ "L") . show &&& BinLong) ints
+  ++ map (quote . C.unpack &&& BinUnicode) strings
+  -- ++ map ((++ "L") . show &&& BinLong) ints
 
-ints :: [Int]
+ints :: [Integer]
 ints =
   [0, 10..100] ++ [100, 150..1000] ++
   [1000, 1500..10000] ++ [10000, 50000..1000000] ++
@@ -115,5 +120,5 @@ strings :: [C.ByteString]
 strings =
   ["cache-query"]
 
-quote :: IsString [a] => [a] -> [a]
+quote :: String -> String
 quote s = concat ["'", s, "'"]

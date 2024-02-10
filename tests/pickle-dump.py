@@ -1,4 +1,4 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python
 import argparse
 import pickle
 import pickletools
@@ -10,7 +10,7 @@ def run(args):
     with open(args.output, 'wb') as fh:
       pickle.dump(expr, fh, protocol=protocol)
   else:
-      print repr(pickle.dumps(expr, protocol=protocol))
+      print(repr(pickle.dumps(expr, protocol=protocol)))
 
   if not args.output and args.disassembly:
     d = pickle.dumps(expr, protocol=protocol)
